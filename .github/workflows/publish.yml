@@ -1,0 +1,32 @@
+# Publishes @briefgate/mcp when a v* tag is pushed.
+#
+# Authentication is npm trusted publishing (OIDC): npm is configured to trust
+# this repository and this workflow, so the job proves who it is with a
+# short-lived token GitHub mints for the run. No npm token is stored here, and
+# no one has to hold a TOTP device — which matters because npm is restricting
+# tokens that bypass 2FA for direct publishing from January 2027.
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required for trusted publishing; without it npm falls back to a token
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      # npm's OIDC support landed in 11.5.1; the runner's bundled npm may be older.
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run check
+      - run: npm publish
