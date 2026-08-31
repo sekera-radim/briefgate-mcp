@@ -176,7 +176,7 @@ Example:
   ]
 }
 
-Item types: text, longtext, file, file_list, image, color_list, select (requires options[]), boolean, url, secret (encrypted, one-time reveal), structured (requires schema with JSON Schema).
+Item types: text, longtext, file, file_list, image, color_list, select (requires options[]), boolean, url, secret (encrypted; revealed exactly once — store the value on the first read), structured (requires schema with JSON Schema).
 Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they become property names in get_intake_results.`,
     inputSchema: {
       type: 'object' as const,
