@@ -65,6 +65,7 @@ export const itemDefinitionSchema = z
   .object({
     key: itemKeySchema,
     type: itemTypeSchema,
+    assignee: z.enum(['client', 'owner']).default('client'),
     label: z.string().min(1).max(200),
     help: z.string().max(1000).optional(),
     required: z.boolean().default(true),
@@ -304,6 +305,16 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
                   'secret',
                   'structured',
                 ],
+              },
+              assignee: {
+                type: 'string',
+                enum: ['client', 'owner'],
+                description:
+                  'Who owes this. "client" (the default) is something the client fills in through the portal. ' +
+                  '"owner" is a private to-do for the account holder, e.g. "call the client": it never appears ' +
+                  'in the client portal, is never mentioned in a reminder, and never holds up completion of the ' +
+                  'intake. Use type "boolean" for a plain tick-off task. Owner items cannot use type file, ' +
+                  'file_list, image or secret.',
               },
               label: { type: 'string', description: 'Human-readable label shown to the client.' },
               help: { type: 'string', description: 'Additional instructions shown below the label.' },
