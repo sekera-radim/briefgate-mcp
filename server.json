@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sekera-radim/briefgate",
+  "title": "BriefGate",
+  "description": "BriefGate MCP server — your coding agent asks the client for logos, copy and credentials, BriefGate chases them until they arrive.",
+  "websiteUrl": "https://briefgate.dev",
+  "repository": {
+    "url": "https://github.com/sekera-radim/briefgate-mcp",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@briefgate/mcp",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BRIEFGATE_API_KEY",
+          "description": "BriefGate API key (bg_live_... or bg_test_...). Obtain from the dashboard at briefgate.dev.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "BRIEFGATE_BASE_URL",
+          "description": "Base URL override for staging or local development. Defaults to https://api.briefgate.dev.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

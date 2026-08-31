@@ -1,0 +1,67 @@
+{
+  "name": "@briefgate/mcp",
+  "version": "0.2.0",
+  "mcpName": "io.github.sekera-radim/briefgate",
+  "description": "BriefGate MCP server — your coding agent asks the client for logos, copy and credentials, and BriefGate chases them until they arrive.",
+  "keywords": [
+    "mcp",
+    "briefgate",
+    "client-intake",
+    "onboarding",
+    "ai-agent",
+    "claude-code",
+    "freelance"
+  ],
+  "license": "MIT",
+  "author": "Radim Sekera",
+  "homepage": "https://briefgate.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sekera-radim/briefgate-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sekera-radim/briefgate-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./webhook": "./dist/webhook.js"
+  },
+  "bin": {
+    "briefgate-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.15.29",
+    "eslint": "^9.39.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^3.2.7"
+  }
+}

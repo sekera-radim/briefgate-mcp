@@ -1,0 +1,819 @@
+// Tool definitions, Zod validation, and execute functions for all 7 BriefGate MCP tools.
+// TOOLS is the JSON-schema array sent to the MCP client in ListTools.
+// executeTool dispatches CallTool requests to typed execute functions.
+
+import { z } from 'zod';
+import { createHash } from 'node:crypto';
+import {
+  type BriefGateConfig,
+  createIntake,
+  listIntakes,
+  getIntakeStatus,
+  getIntakeResults,
+  addItems,
+  requestRevision,
+  sendChase,
+} from './client.js';
+
+// ─── Shared Zod schemas (exported for testing) ────────────────────────────────
+
+export const itemKeySchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(
+    /^[a-z][a-z0-9_]*$/,
+    'Item key must be snake_case: start with a lowercase letter, then letters/digits/underscores (e.g. "logo", "hero_copy", "ga4_id")',
+  );
+
+const itemTypeSchema = z.enum([
+  'text',
+  'longtext',
+  'file',
+  'file_list',
+  'image',
+  'color_list',
+  'select',
+  'boolean',
+  'url',
+  'secret',
+  'structured',
+]);
+
+const constraintsSchema = z
+  .object({
+    formats: z.array(z.string().min(1).max(10)).max(20).optional(),
+    min_width: z.number().int().positive().max(20000).optional(),
+    min_height: z.number().int().positive().max(20000).optional(),
+    max_width: z.number().int().positive().max(20000).optional(),
+    max_height: z.number().int().positive().max(20000).optional(),
+    max_bytes: z.number().int().positive().optional(),
+    min_chars: z.number().int().nonnegative().optional(),
+    max_chars: z.number().int().positive().optional(),
+    min_count: z.number().int().nonnegative().max(200).optional(),
+    max_count: z.number().int().positive().max(200).optional(),
+    transparent_background: z.boolean().optional(),
+  })
+  .optional();
+
+const itemOptionSchema = z.object({
+  value: z.string().min(1).max(200),
+  label: z.string().min(1).max(200),
+});
+
+export const itemDefinitionSchema = z
+  .object({
+    key: itemKeySchema,
+    type: itemTypeSchema,
+    label: z.string().min(1).max(200),
+    help: z.string().max(1000).optional(),
+    required: z.boolean().default(true),
+    constraints: constraintsSchema,
+    schema: z.record(z.unknown()).optional(),
+    options: z.array(itemOptionSchema).max(100).optional(),
+    pattern: z.string().max(300).optional(),
+  })
+  .superRefine((item, ctx) => {
+    if (item.type === 'select' && (!item.options || item.options.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['options'],
+        message: 'type=select requires a non-empty options array',
+      });
+    }
+    if (item.type === 'structured' && !item.schema) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['schema'],
+        message: 'type=structured requires a JSON Schema object in `schema`',
+      });
+    }
+  });
+
+const clientSchema = z.object({
+  email: z.string().email().max(320),
+  name: z.string().max(200).optional(),
+  language: z.enum(['cs', 'sk', 'pl', 'de', 'es', 'en']).optional(),
+  timezone: z.string().optional(),
+  phone: z
+    .string()
+    .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
+    .optional(),
+});
+
+const brandingSchema = z.object({
+  logo_url: z.string().url().optional(),
+  accent_color: z
+    .string()
+    .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Expected a hex color like #1B2A4A')
+    .optional(),
+  sender_name: z.string().min(1).max(100).optional(),
+  reply_to: z.string().email().optional(),
+});
+
+const defineIntakeSchema = z.object({
+  project_name: z.string().min(1).max(200),
+  client: clientSchema,
+  due_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+    .optional(),
+  branding: brandingSchema.optional(),
+  chase_schedule: z.enum(['default', 'gentle', 'aggressive', 'custom', 'off']).optional(),
+  chase_interval: z.number().int().min(1).optional(),
+  chase_interval_unit: z.enum(['minutes', 'hours', 'days']).optional(),
+  respect_quiet_hours: z.boolean().optional(),
+  max_reminders: z.union([z.number().int().min(1).max(1000), z.literal('unlimited')]).optional(),
+  chase_at_time: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a 24-hour local time like "07:00"')
+    .optional(),
+  email_copy: z
+    .object({
+      invite_subject: z.string().min(1).max(200).optional(),
+      invite_intro: z.string().min(1).max(600).optional(),
+      reminder_subject: z.string().min(1).max(200).optional(),
+      reminder_intro: z.string().min(1).max(600).optional(),
+    })
+    .optional(),
+  items: z.array(itemDefinitionSchema).min(1).max(100),
+  template: z.string().max(100).optional(),
+  auto_approve_hours: z.number().int().min(0).max(720).optional(),
+  retention: z
+    .object({
+      mode: z.enum(['days', 'on_delivery']).optional(),
+      days: z.number().int().min(1).max(3650).optional(),
+      anonymize: z.boolean().optional(),
+    })
+    .optional(),
+  send: z.boolean().optional(),
+});
+
+// ─── MCP tool definitions (JSON schema, sent to the MCP client) ───────────────
+
+export const TOOLS = [
+  {
+    name: 'define_intake',
+    description: `Create a new client intake request — a branded portal where the client submits logos, copy, files, credentials, and other assets. BriefGate sends the invite email and chases the client automatically until all items are collected.
+
+Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status }. Save intake_id — you need it for all follow-up calls.
+
+Example:
+{
+  "project_name": "Website for John Finance",
+  "client": { "email": "john@example.com", "name": "John", "language": "cs" },
+  "due_date": "2026-08-15",
+  "branding": { "accent_color": "#1B2A4A", "sender_name": "Radim" },
+  "items": [
+    { "key": "logo", "type": "image", "label": "Company logo",
+      "constraints": { "formats": ["svg","png"], "min_width": 512 } },
+    { "key": "hero_copy", "type": "longtext", "label": "Homepage headline (2–3 sentences)",
+      "constraints": { "max_chars": 400 } },
+    { "key": "wp_admin", "type": "secret", "label": "WordPress admin credentials" },
+    { "key": "photos", "type": "file_list", "label": "Photos (5–10 images)",
+      "constraints": { "formats": ["jpg","png","heic"], "min_count": 5, "max_count": 15 } }
+  ]
+}
+
+Item types: text, longtext, file, file_list, image, color_list, select (requires options[]), boolean, url, secret (encrypted, one-time reveal), structured (requires schema with JSON Schema).
+Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they become property names in get_intake_results.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        project_name: {
+          type: 'string',
+          description: 'Human-readable project name shown in the invite email and portal heading.',
+        },
+        client: {
+          type: 'object',
+          description: 'Client contact details.',
+          properties: {
+            email: { type: 'string', description: 'Client email address (required).' },
+            name: { type: 'string', description: 'Client name for personalised emails.' },
+            language: {
+              type: 'string',
+              enum: ['cs', 'sk', 'pl', 'de', 'es', 'en'],
+              description:
+                'Portal and email language: cs, sk, pl, de, es, en. ' +
+                "Omit it and the account's default language is used, falling back to English.",
+            },
+            timezone: {
+              type: 'string',
+              description: 'IANA timezone (e.g. Europe/Prague) for quiet-hours scheduling.',
+            },
+            phone: {
+              type: 'string',
+              description: 'E.164 phone number (e.g. +420601123456) — required for SMS reminders.',
+            },
+          },
+          required: ['email'],
+        },
+        due_date: {
+          type: 'string',
+          description: 'Deadline in YYYY-MM-DD format. Shown in the portal and used to escalate chase cadence.',
+        },
+        branding: {
+          type: 'object',
+          description: 'Override account-level branding for this intake.',
+          properties: {
+            logo_url: { type: 'string', description: 'https URL of your logo (shown in portal header).' },
+            accent_color: { type: 'string', description: 'Hex accent color, e.g. #1B2A4A.' },
+            sender_name: { type: 'string', description: 'Name shown as email sender, e.g. "Radim".' },
+            reply_to: { type: 'string', description: 'Reply-to email address.' },
+          },
+        },
+        chase_schedule: {
+          type: 'string',
+          enum: ['default', 'gentle', 'aggressive', 'custom', 'off'],
+          description:
+            'Automated reminder cadence. default=T+2d,T+5d,T+9d,weekly. gentle=T+3d,T+8d,biweekly. aggressive=T+1d,T+3d,T+5d,every-other-day. custom=every chase_interval chase_interval_unit. off=no auto reminders.',
+        },
+        chase_interval: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'How often to remind, only with chase_schedule="custom". Pair with chase_interval_unit. ' +
+            'Defaults to every 3 days when omitted. The interval must work out to at least 5 minutes and at most 90 days.',
+        },
+        chase_interval_unit: {
+          type: 'string',
+          enum: ['minutes', 'hours', 'days'],
+          description: 'Unit for chase_interval. Defaults to "days".',
+        },
+        respect_quiet_hours: {
+          type: 'boolean',
+          description:
+            "Hold reminders to the client's 08:00-19:00 local window (default true). " +
+            'A cadence of minutes or hours pauses overnight and resumes in the morning; set false to send around the clock.',
+        },
+        max_reminders: {
+          description:
+            'Reminders to send before the intake is marked stalled and handed back to you (default 3). ' +
+            'An integer from 1 to 1000, or the string "unlimited" to keep reminding until the client finishes. ' +
+            'Raise it for a rapid cadence, which would otherwise exhaust three attempts in minutes. ' +
+            'A bounce or spam complaint always cancels the remaining reminders, whatever this is set to.',
+          oneOf: [
+            { type: 'integer', minimum: 1, maximum: 1000 },
+            { type: 'string', enum: ['unlimited'] },
+          ],
+        },
+        email_copy: {
+          type: 'object',
+          description:
+            'Your own subject and intro lines, overriding the built-in translation for this intake. ' +
+            'Placeholders: {sender}, {project}, {client}, {count}, {minutes}, {due}. ' +
+            'An unknown placeholder is rejected rather than rendered literally to the client. ' +
+            'Layout, button and footer stay as they are.',
+          properties: {
+            invite_subject: { type: 'string', maxLength: 200 },
+            invite_intro: { type: 'string', maxLength: 600 },
+            reminder_subject: { type: 'string', maxLength: 200 },
+            reminder_intro: { type: 'string', maxLength: 600 },
+          },
+        },
+        chase_at_time: {
+          type: 'string',
+          description:
+            'Local time of day to send reminders at, "HH:MM" in the client\'s timezone (e.g. "07:00"). ' +
+            'Anchors the cadence to a clock time instead of counting from the invite, and needs an interval ' +
+            'measured in whole days. Naming a time deliberately overrides quiet hours, so "07:00" stays 07:00.',
+        },
+        items: {
+          type: 'array',
+          description: 'List of assets to collect. Each item has key, type, label, and optional constraints.',
+          items: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string',
+                description:
+                  'snake_case identifier (e.g. "logo", "hero_copy"). Becomes the property name in get_intake_results output.',
+              },
+              type: {
+                type: 'string',
+                enum: [
+                  'text',
+                  'longtext',
+                  'file',
+                  'file_list',
+                  'image',
+                  'color_list',
+                  'select',
+                  'boolean',
+                  'url',
+                  'secret',
+                  'structured',
+                ],
+              },
+              label: { type: 'string', description: 'Human-readable label shown to the client.' },
+              help: { type: 'string', description: 'Additional instructions shown below the label.' },
+              required: { type: 'boolean', description: 'Whether the client must fill this in. Default: true.' },
+              constraints: {
+                type: 'object',
+                description:
+                  'Type-specific constraints: formats, min_width/min_height (image), min_chars/max_chars (text), min_count/max_count (file_list).',
+              },
+              schema: {
+                type: 'object',
+                description: 'JSON Schema for type=structured. Required when type=structured.',
+              },
+              options: {
+                type: 'array',
+                description:
+                  'Dropdown options for type=select. Required when type=select. Each item: { value, label }.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    value: { type: 'string' },
+                    label: { type: 'string' },
+                  },
+                  required: ['value', 'label'],
+                },
+              },
+              pattern: { type: 'string', description: 'Regex pattern for type=text validation (e.g. "^G-[A-Z0-9]+$").' },
+            },
+            required: ['key', 'type', 'label'],
+          },
+          minItems: 1,
+          maxItems: 100,
+        },
+        template: {
+          type: 'string',
+          description: 'Template slug to pre-populate items (e.g. "restaurant-website", "consulting-firm").',
+        },
+        auto_approve_hours: {
+          type: 'number',
+          description:
+            'Hours after submission before an item is auto-approved without agent review. Default: 72. Set to 0 to require explicit approval.',
+        },
+        retention: {
+          type: 'object',
+          description:
+            'How long BriefGate keeps this intake after it is finished. Default: purged 90 days after the client completes. ' +
+            'Use mode "on_delivery" when the intake holds anything sensitive (credentials, personal photos): the contents are ' +
+            'then removed shortly after YOU collect them with get_intake_results, because at that point you already have the ' +
+            'files and there is no reason for a copy to sit on our server. An intake you never collect still expires on the ' +
+            'day count, so this can only ever delete data earlier, never later. ' +
+            'Example: { "mode": "on_delivery" } — or { "mode": "days", "days": 7 } to just shorten the window.',
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['days', 'on_delivery'],
+              description:
+                '"days" (default): purge N days after the client finishes. "on_delivery": purge ~24h after you collect the results.',
+            },
+            days: {
+              type: 'number',
+              description: 'Days to keep after completion. Only valid with mode "days". Defaults to the account setting (90).',
+            },
+            anonymize: {
+              type: 'boolean',
+              description:
+                'Default true: keep the project record (name, item labels, statuses, dates) and delete everything belonging to ' +
+                'the client — files, secrets, submitted values, email, name, phone, and the portal link. Set false to delete the ' +
+                'whole intake including its history.',
+            },
+          },
+        },
+        send: {
+          type: 'boolean',
+          description:
+            'Whether to send the invite email immediately. Default: true. Set to false to create a draft and call /v1/intakes/:id/send later.',
+        },
+      },
+      required: ['project_name', 'client', 'items'],
+    },
+  },
+
+  {
+    name: 'get_intake_status',
+    description: `Check the completion status of a client intake — which items are submitted, pending, or need revision; the history of automated chase emails sent; and when the client last opened the portal.
+
+Use this to decide whether to send a manual reminder (send_chase), request a revision (request_revision), or fetch results (get_intake_results). Returns per-item status and chase history.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: {
+          type: 'string',
+          description: 'Intake ID returned by define_intake (e.g. "in_8f3k").',
+        },
+      },
+      required: ['intake_id'],
+    },
+  },
+
+  {
+    name: 'get_intake_results',
+    description: `Retrieve the typed submitted values from a client intake.
+
+Files are returned as signed URLs valid for 24 hours — download them promptly or store the URL for reuse within that window.
+
+Secrets (type=secret, e.g. passwords, API keys) are decrypted and returned in plaintext on the FIRST call only. After the first retrieval the secret is marked as read: subsequent calls return first_reveal: false in meta and omit the value. Store secrets immediately before proceeding — you cannot retrieve them again.
+
+Use only_new=true to get only items submitted since the last call (useful in webhook-driven workflows). Use include_pending=true to also return partially filled items.
+
+Returns { results: { <key>: <typed value> }, meta: { <key>: { type, status, submitted_at, first_reveal? } } }.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: {
+          type: 'string',
+          description: 'Intake ID returned by define_intake.',
+        },
+        only_new: {
+          type: 'boolean',
+          description:
+            'Return only items submitted or updated since the previous get_intake_results call. Default: false.',
+        },
+        include_pending: {
+          type: 'boolean',
+          description: 'Include items not yet submitted (useful for partial progress checks). Default: false.',
+        },
+      },
+      required: ['intake_id'],
+    },
+  },
+
+  {
+    name: 'request_revision',
+    description: `Ask the client to resubmit a specific item with a note explaining what is wrong.
+
+Use this after reviewing get_intake_results and finding an item that does not meet requirements — for example a blurry logo, copy that is too long, or a broken URL. The client is notified automatically and the item status moves to needs_revision.
+
+Returns { status: "revision_requested", item_key }.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: {
+          type: 'string',
+          description: 'Intake ID returned by define_intake.',
+        },
+        item_key: {
+          type: 'string',
+          description: 'The key of the item to revise (e.g. "logo", "hero_copy").',
+        },
+        note: {
+          type: 'string',
+          description:
+            'Plain-language explanation shown to the client (e.g. "Logo is blurry — we need at least 512 px wide in SVG or PNG with a transparent background").',
+        },
+      },
+      required: ['intake_id', 'item_key', 'note'],
+    },
+  },
+
+  {
+    name: 'send_chase',
+    description: `Send a manual reminder to the client outside the automatic schedule.
+
+Use when a deadline is approaching and the client has not responded to automatic reminders, or when you want to send an SMS after email attempts have failed. The automatic chase schedule continues after this call — this is an extra nudge, not a replacement.
+
+Returns { sent: true }.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: {
+          type: 'string',
+          description: 'Intake ID returned by define_intake.',
+        },
+        channel: {
+          type: 'string',
+          enum: ['email', 'sms'],
+          description:
+            'Delivery channel. Default: email. Use "sms" only if the client provided a phone number and has not responded to emails.',
+        },
+      },
+      required: ['intake_id'],
+    },
+  },
+
+  {
+    name: 'list_intakes',
+    description: `List all intakes in your account, optionally filtered by status or client email.
+
+Use this to get an overview of active projects, find a specific intake by the client's email when you have lost the intake_id, or check how many intakes are currently in progress.
+
+Returns { intakes: [...], total } where each intake includes intake_id, project_name, status, created_at, due_date, and portal_url.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'],
+          description: 'Filter by intake status. Omit to return all.',
+        },
+        client_email: {
+          type: 'string',
+          description: 'Filter by client email address.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of results (1–100). Default: 20.',
+        },
+        offset: {
+          type: 'number',
+          description: 'Pagination offset. Default: 0.',
+        },
+      },
+      required: [],
+    },
+  },
+
+  {
+    name: 'add_items',
+    description: `Add new items to an already-sent intake — for example, when you realise mid-project that you also need a favicon, social media assets, or additional credentials.
+
+The client is notified about the new items. Existing items and their submitted values are not affected. Returns the updated intake object.
+
+Items must follow the same key/type/label rules as define_intake (snake_case keys, type-specific constraints).`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: {
+          type: 'string',
+          description: 'Intake ID returned by define_intake.',
+        },
+        items: {
+          type: 'array',
+          description: 'New items to add. Same schema as define_intake items.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'snake_case key, unique within the intake.' },
+              type: {
+                type: 'string',
+                enum: [
+                  'text', 'longtext', 'file', 'file_list', 'image',
+                  'color_list', 'select', 'boolean', 'url', 'secret', 'structured',
+                ],
+              },
+              label: { type: 'string', description: 'Human-readable label shown to the client.' },
+              help: { type: 'string' },
+              required: { type: 'boolean' },
+              constraints: { type: 'object' },
+              schema: { type: 'object' },
+              options: { type: 'array', items: { type: 'object' } },
+              pattern: { type: 'string' },
+            },
+            required: ['key', 'type', 'label'],
+          },
+          minItems: 1,
+          maxItems: 50,
+        },
+      },
+      required: ['intake_id', 'items'],
+    },
+  },
+];
+
+// ─── Tool result type ─────────────────────────────────────────────────────────
+
+export interface ToolResult {
+  text: string;
+  isError?: boolean;
+}
+
+// ─── Idempotency key ──────────────────────────────────────────────────────────
+
+// Derive a stable key from project name + client email + a canonical hash of
+// the items list. Including items prevents two *different* intakes for the same
+// client/project (e.g. a new project a year later with a different scope) from
+// colliding on the server: same project_name + client but different items →
+// different key → two distinct intakes. Retries with identical args still
+// produce the same key, so the server correctly deduplicates them.
+function deriveIdempotencyKey(
+  projectName: string,
+  clientEmail: string,
+  items: Array<{ key: string; [k: string]: unknown }>,
+): string {
+  // Sort by key so insertion order doesn't affect the hash.
+  const sortedItems = [...items].sort((a, b) => (a.key > b.key ? 1 : -1));
+  const itemsFingerprint = createHash('sha256')
+    .update(JSON.stringify(sortedItems))
+    .digest('hex')
+    .slice(0, 16);
+
+  return createHash('sha256')
+    .update(`${projectName}\0${clientEmail}\0${itemsFingerprint}`)
+    .digest('hex')
+    .slice(0, 40);
+}
+
+function validationError(issues: z.ZodIssue[]): ToolResult {
+  const messages = issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+  return { text: `Validation error: ${messages}`, isError: true };
+}
+
+// ─── Execute functions ────────────────────────────────────────────────────────
+
+const UNIT_MINUTES = { minutes: 1, hours: 60, days: 24 * 60 } as const;
+
+/**
+ * Things a caller asking for a fast cadence almost certainly wants to know, and
+ * would otherwise only discover when the reminders stopped after three tries.
+ *
+ * These are returned to the calling agent rather than resolved here: whether to
+ * nag a client hourly through the night is the developer's call, not ours, and
+ * the agent is the one that can ask them.
+ */
+function cadenceNotices(input: z.infer<typeof defineIntakeSchema>): string[] {
+  const out: string[] = [];
+  if (input.chase_schedule !== 'custom') return out;
+
+  const minutes =
+    input.chase_interval === undefined
+      ? undefined
+      : input.chase_interval * UNIT_MINUTES[input.chase_interval_unit ?? 'days'];
+
+  const subDaily = minutes !== undefined && minutes < UNIT_MINUTES.days;
+
+  if (subDaily && input.max_reminders === undefined) {
+    out.push(
+      'Reminders stop after 3 attempts by default, so this cadence will be exhausted quickly and the intake ' +
+        'will be marked stalled. Ask whether to raise the cap — pass max_reminders (1-1000), or "unlimited" ' +
+        'to keep reminding until the client finishes. A bounce or spam complaint cancels the rest either way.',
+    );
+  }
+
+  if (subDaily && input.respect_quiet_hours === undefined && input.chase_at_time === undefined) {
+    out.push(
+      "Quiet hours are on by default, so reminders only go out between 08:00 and 19:00 in the client's " +
+        'timezone and this cadence pauses overnight. Ask whether reminders should also arrive outside those ' +
+        'hours — pass respect_quiet_hours: false to send around the clock.',
+    );
+  }
+
+  if (input.chase_at_time !== undefined) {
+    out.push(
+      `Reminders are anchored to ${input.chase_at_time} in the client's timezone. A time named explicitly ` +
+        'overrides quiet hours, so it is used even if it falls outside 08:00-19:00.',
+    );
+  }
+
+  return out;
+}
+
+export async function callDefineIntake(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = defineIntakeSchema.safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const { project_name, client, items, ...rest } = parsed.data;
+  const idempotencyKey = deriveIdempotencyKey(project_name, client.email, items);
+
+  const result = await createIntake(
+    config,
+    { project_name, client, items, ...rest },
+    idempotencyKey,
+  );
+
+  const notices = cadenceNotices(parsed.data);
+
+  return {
+    text: JSON.stringify(
+      {
+        intake_id: result.intake_id,
+        portal_url: result.portal_url,
+        status: result.status,
+        ...(notices.length > 0 ? { notices } : {}),
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+export async function callGetIntakeStatus(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z.object({ intake_id: z.string().min(1) }).safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await getIntakeStatus(config, parsed.data.intake_id);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callGetIntakeResults(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      intake_id: z.string().min(1),
+      only_new: z.boolean().optional(),
+      include_pending: z.boolean().optional(),
+    })
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const { intake_id, only_new, include_pending } = parsed.data;
+  const result = await getIntakeResults(config, intake_id, {
+    only_new: only_new ?? false,
+    include_pending: include_pending ?? false,
+  });
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callRequestRevision(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      intake_id: z.string().min(1),
+      item_key: z.string().min(1),
+      note: z.string().min(1).max(2000),
+    })
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await requestRevision(
+    config,
+    parsed.data.intake_id,
+    parsed.data.item_key,
+    parsed.data.note,
+  );
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callSendChase(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      intake_id: z.string().min(1),
+      channel: z.enum(['email', 'sms']).optional(),
+    })
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await sendChase(config, parsed.data.intake_id, parsed.data.channel);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callListIntakes(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      status: z
+        .enum(['draft', 'sent', 'in_progress', 'completed', 'archived'])
+        .optional(),
+      client_email: z.string().email().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await listIntakes(config, parsed.data);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callAddItems(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      intake_id: z.string().min(1),
+      items: z.array(itemDefinitionSchema).min(1).max(50),
+    })
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await addItems(config, parsed.data.intake_id, parsed.data.items);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+// ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+export async function executeTool(
+  name: string,
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  switch (name) {
+    case 'define_intake':
+      return callDefineIntake(config, args);
+    case 'get_intake_status':
+      return callGetIntakeStatus(config, args);
+    case 'get_intake_results':
+      return callGetIntakeResults(config, args);
+    case 'request_revision':
+      return callRequestRevision(config, args);
+    case 'send_chase':
+      return callSendChase(config, args);
+    case 'list_intakes':
+      return callListIntakes(config, args);
+    case 'add_items':
+      return callAddItems(config, args);
+    default:
+      return { text: `Unknown tool: ${name}`, isError: true };
+  }
+}
