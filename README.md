@@ -308,7 +308,7 @@ Full pricing at `GET https://api.briefgate.dev/pricing.json` (no auth required â
 
 ## Data residency
 
-BriefGate is hosted in the EU (Hetzner, Cloudflare R2 EU jurisdiction). See the [GDPR notes](https://briefgate.dev/docs/gdpr) and the [DPA](https://briefgate.dev/docs/dpa).
+BriefGate is hosted in the EU: application servers at netcup GmbH in Nuremberg, Germany; files in Cloudflare R2 under EU jurisdiction. See the [GDPR notes](https://briefgate.dev/docs/gdpr) and the [DPA](https://briefgate.dev/docs/dpa).
 
 ## Contributing
 
