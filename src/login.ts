@@ -27,6 +27,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function openBrowser(url: string): void {
+  // Headless boxes (an SSH session, CI) have nothing to open, and tests must
+  // never pop a real browser on the developer's desk.
+  if (process.env['BRIEFGATE_NO_BROWSER']) return;
   const platform = process.platform;
   const [cmd, args] =
     platform === 'darwin'

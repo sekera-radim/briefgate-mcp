@@ -117,6 +117,7 @@ Same flow, for a client that can't block a terminal on your click. `login` is **
 | `BRIEFGATE_API_KEY` | No | — | API key (`bg_live_...` or `bg_test_...`). Takes precedence over a credential stored by `login`. If nothing is configured, tool calls fail with a message pointing at `login`. |
 | `BRIEFGATE_BASE_URL` | No | `https://api.briefgate.dev` | Override for staging or local development. |
 | `BRIEFGATE_CREDENTIALS_FILE` | No | `~/.briefgate/credentials.json` | Where `login`/`logout` store the key. Mainly for tests and unusual setups. |
+| `BRIEFGATE_NO_BROWSER` | No | unset | Set to `1` to stop `login` from opening a browser (headless servers, CI); the URL is printed either way. |
 | `BRIEFGATE_MCP_HTTP` | No | — | Set to `1` to start Streamable HTTP instead of stdio. |
 | `BRIEFGATE_MCP_PORT` | No | `3000` | Port for HTTP mode. |
 | `BRIEFGATE_MCP_PUBLIC_HOST` | No | — | Publishes the server as a shared, multi-customer OAuth endpoint. See [Hosted endpoint + OAuth](#hosted-endpoint--oauth). |
