@@ -9,6 +9,8 @@ import {
   callSendChase,
   callListIntakes,
   callAddItems,
+  callUpdateItem,
+  callManageWebhook,
   type ToolResult,
 } from '../src/tools.js';
 import type { BriefGateConfig } from '../src/client.js';
@@ -538,6 +540,68 @@ describe('callAddItems', () => {
   });
 });
 
+// ─── callUpdateItem ───────────────────────────────────────────────────────────
+
+// The situation: you asked for an image and the client only has the logo as a
+// PDF. Widening the item is what unblocks them, so the tool has to reach the
+// right endpoint and refuse the changes that would leave the item unusable.
+describe('callUpdateItem', () => {
+  it('PATCHes the single item, not the intake', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ item: { key: 'logo', type: 'file' } }));
+
+    const result = await callUpdateItem(config, {
+      intake_id: 'in_1',
+      item_key: 'logo',
+      type: 'file',
+      constraints: { formats: ['svg', 'png', 'pdf'] },
+    });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/intakes/in_1/items/logo');
+    expect(init.method).toBe('PATCH');
+    expect(result.isError).toBeFalsy();
+  });
+
+  // The key and the id address the item; sending them as changes would ask the
+  // server to rename it, which it refuses.
+  it('sends only the changed fields, not the addressing ones', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ item: { key: 'logo' } }));
+
+    await callUpdateItem(config, { intake_id: 'in_1', item_key: 'logo', label: 'Logo firmy' });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({ label: 'Logo firmy' });
+  });
+
+  it('refuses a call that changes nothing', async () => {
+    const result = await callUpdateItem(config, { intake_id: 'in_1', item_key: 'logo' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/at least one field/i);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('will not rename the key', async () => {
+    const result = await callUpdateItem(config, { intake_id: 'in_1', item_key: 'logo', key: 'brand_logo' });
+    expect(result.isError).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('passes the discard flag through once the caller opts in', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ item: { key: 'logo' }, discarded_submitted_value: true }));
+
+    await callUpdateItem(config, {
+      intake_id: 'in_1',
+      item_key: 'logo',
+      type: 'file',
+      discard_submitted_value: true,
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ discard_submitted_value: true });
+  });
+});
+
 // ─── cadence notices: what a fast cadence quietly implies ─────────────────────
 
 describe('callDefineIntake — cadence notices', () => {
@@ -614,5 +678,91 @@ describe('callDefineIntake — cadence notices', () => {
       max_reminders: 'forever',
     });
     expect(result.isError).toBe(true);
+  });
+});
+
+// ─── manage_webhook ───────────────────────────────────────────────────────────
+//
+// The REST routes accepted an API key from the start, but no MCP tool reached
+// them, so an agent could verify an incoming webhook and never register one.
+
+describe('callManageWebhook', () => {
+  it('creates an endpoint and tells the caller to store the secret', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockOk({ id: 'whe_1', url: 'https://x.dev/h', events: ['intake.completed'], secret: 'whsec_abc' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callManageWebhook(config, {
+      action: 'create',
+      url: 'https://x.dev/h',
+      events: ['intake.completed'],
+    });
+
+    expect(res.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/webhooks');
+    expect(init.method).toBe('POST');
+    // The secret is returned exactly once, so the reply has to say so — an
+    // agent that treats it as retrievable loses it.
+    expect(res.text).toContain('whsec_abc');
+    expect(res.text).toMatch(/only on creation/i);
+  });
+
+  it('lists endpoints without needing any other argument', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockOk({ webhooks: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callManageWebhook(config, { action: 'list' });
+    expect(res.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toBe('https://api.briefgate.dev/v1/webhooks');
+    expect(init?.method ?? 'GET').toBe('GET');
+  });
+
+  it('deletes by id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockOk({ deleted: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callManageWebhook(config, { action: 'delete', webhook_id: 'whe_1' });
+    expect(res.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/webhooks/whe_1');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('refuses create without url or events, naming the action', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const noUrl = await callManageWebhook(config, { action: 'create', events: ['intake.completed'] });
+    const noEvents = await callManageWebhook(config, { action: 'create', url: 'https://x.dev/h' });
+
+    expect(noUrl.isError).toBe(true);
+    expect(noEvents.isError).toBe(true);
+    expect(noUrl.text).toContain('create');
+    // Nothing may reach the API on a request that cannot succeed.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses delete without an id', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await callManageWebhook(config, { action: 'delete' });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('webhook_id');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown event rather than passing it through', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await callManageWebhook(config, {
+      action: 'create',
+      url: 'https://x.dev/h',
+      events: ['intake.finished'],
+    });
+    expect(res.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

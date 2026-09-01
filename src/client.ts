@@ -297,6 +297,15 @@ export async function addItems(
   return apiRequest<IntakeCreated>(config, 'POST', `/intakes/${intakeId}/items`, { items });
 }
 
+export async function updateItem(
+  config: BriefGateConfig,
+  intakeId: string,
+  itemKey: string,
+  changes: Record<string, unknown>,
+): Promise<{ item: Record<string, unknown>; discarded_submitted_value?: boolean }> {
+  return apiRequest(config, 'PATCH', `/intakes/${intakeId}/items/${encodeURIComponent(itemKey)}`, changes);
+}
+
 export async function requestRevision(
   config: BriefGateConfig,
   intakeId: string,
@@ -319,6 +328,42 @@ export async function sendChase(
   return apiRequest<{ sent: true }>(config, 'POST', `/intakes/${intakeId}/chase`, {
     ...(channel !== undefined && { channel }),
   });
+}
+
+// ─── Webhooks ─────────────────────────────────────────────────────────────────
+//
+// The REST routes have always accepted an API key ("an agent must be able to
+// register its own webhook over MCP/REST rather than the developer having to
+// click through the dashboard"), but no MCP tool ever reached them, so the
+// only way to set one up was the dashboard. These close that gap.
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  events: string[];
+  format: string;
+  active: boolean;
+  created_at: string;
+}
+
+export async function listWebhooks(
+  config: BriefGateConfig,
+): Promise<{ webhooks: WebhookEndpoint[] }> {
+  return apiRequest<{ webhooks: WebhookEndpoint[] }>(config, 'GET', '/webhooks');
+}
+
+export async function createWebhook(
+  config: BriefGateConfig,
+  payload: { url: string; events: string[]; format?: string },
+): Promise<WebhookEndpoint & { secret: string }> {
+  return apiRequest<WebhookEndpoint & { secret: string }>(config, 'POST', '/webhooks', payload);
+}
+
+export async function deleteWebhook(
+  config: BriefGateConfig,
+  id: string,
+): Promise<{ deleted: true }> {
+  return apiRequest<{ deleted: true }>(config, 'DELETE', `/webhooks/${id}`);
 }
 
 export async function getUsage(config: BriefGateConfig): Promise<UsageResult> {

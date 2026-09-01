@@ -11,8 +11,12 @@ import {
   getIntakeStatus,
   getIntakeResults,
   addItems,
+  updateItem,
   requestRevision,
   sendChase,
+  listWebhooks,
+  createWebhook,
+  deleteWebhook,
 } from './client.js';
 
 // ─── Shared Zod schemas (exported for testing) ────────────────────────────────
@@ -133,6 +137,25 @@ const brandingSchema = z
   })
   .strict();
 
+const updateItemSchema = z
+  .object({
+    intake_id: z.string().min(1),
+    item_key: itemKeySchema,
+    type: itemTypeSchema.optional(),
+    label: z.string().min(1).max(200).optional(),
+    help: z.string().max(1000).nullable().optional(),
+    required: z.boolean().optional(),
+    constraints: constraintsSchema.unwrap().nullable().optional(),
+    options: z.array(itemOptionSchema).max(100).nullable().optional(),
+    pattern: z.string().max(300).nullable().optional(),
+    discard_submitted_value: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    v => Object.keys(v).some(k => !['intake_id', 'item_key', 'discard_submitted_value'].includes(k)),
+    { message: 'Provide at least one field to change (type, label, help, required, constraints, options, pattern).' },
+  );
+
 const defineIntakeSchema = z
   .object({
     project_name: z.string().min(1).max(200),
@@ -182,7 +205,12 @@ export const TOOLS = [
     name: 'define_intake',
     description: `Create a new client intake request — a branded portal where the client submits logos, copy, files, credentials, and other assets. BriefGate sends the invite email and chases the client automatically until all items are collected.
 
-Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status }. Save intake_id — you need it for all follow-up calls.
+Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status, follow_up }. Save intake_id — you need it for all follow-up calls.
+
+AFTER CREATING AN INTAKE, SET UP HOW YOU WILL LEARN IT IS DONE. Nothing pushes to you on its own: MCP is request/response, so the server cannot wake you when the client finishes. Creating the intake and never checking again is the common failure — the completed work then sits in the portal until a human happens to look. The returned follow_up block tells you which of the two mechanisms applies:
+
+- follow_up.recommended = "webhook" — the account already has an endpoint; deliveries will arrive there and you need do nothing further.
+- follow_up.recommended = "schedule" — no endpoint is registered. If you control a service that can receive public HTTPS, register one with manage_webhook. Otherwise tell the user to set up a recurring check (cron, a systemd timer, a scheduled task in their agent host) that calls get_intake_status every follow_up.schedule.every_hours hours until follow_up.schedule.until, and offer to configure it for them.
 
 Example:
 {
@@ -430,7 +458,9 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
     name: 'get_intake_status',
     description: `Check the completion status of a client intake — which items are submitted, pending, or need revision; the history of automated chase emails sent; and when the client last opened the portal.
 
-Use this to decide whether to send a manual reminder (send_chase), request a revision (request_revision), or fetch results (get_intake_results). Returns per-item status and chase history.`,
+Use this to decide whether to send a manual reminder (send_chase), request a revision (request_revision), or fetch results (get_intake_results). Returns per-item status and chase history.
+
+This is also the call a scheduled check should make when no webhook is registered — see follow_up in the define_intake response for the cadence. When status becomes "completed", fetch the results with get_intake_results and carry on with the work that was waiting on them.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -603,6 +633,90 @@ Items must follow the same key/type/label rules as define_intake (snake_case key
         },
       },
       required: ['intake_id', 'items'],
+    },
+  },
+
+  {
+    name: 'update_item',
+    description: `Change one item on an intake that is already with the client — its type, label, hint, whether it is required, and which file formats it accepts.
+
+Reach for this when the field turns out to be the wrong shape: you asked for an image and the client only has their logo as a PDF, or what you asked for as a line of text is really a file. Widening the accepted formats or switching the type unblocks them without adding a duplicate item and waiving the original.
+
+The item key cannot be changed — results come back under it, so renaming would break whatever reads them. Add a new item instead.
+
+If the client has already answered and the change would make their answer invalid, the call fails and nothing is touched. Repeat it with discard_submitted_value: true to clear the answer and ask them again. A change that leaves their answer valid (a new label, a wider limit) never discards anything.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string', description: 'Intake ID returned by define_intake.' },
+        item_key: { type: 'string', description: 'Key of the item to change.' },
+        type: {
+          type: 'string',
+          enum: [
+            'text', 'longtext', 'file', 'file_list', 'image',
+            'color_list', 'select', 'boolean', 'url', 'secret', 'structured',
+          ],
+        },
+        label: { type: 'string', description: 'Human-readable label shown to the client.' },
+        help: { type: ['string', 'null'], description: 'Hint under the label. null clears it.' },
+        required: { type: 'boolean' },
+        constraints: {
+          type: ['object', 'null'],
+          description: 'Same shape as define_intake, e.g. { "formats": ["svg","png","pdf"] }. null clears all constraints.',
+        },
+        options: { type: ['array', 'null'], items: { type: 'object' } },
+        pattern: { type: ['string', 'null'] },
+        discard_submitted_value: {
+          type: 'boolean',
+          description: 'Go ahead even though it throws away what the client already sent. Only set this after the call has failed once for that reason.',
+        },
+      },
+      required: ['intake_id', 'item_key'],
+    },
+  },
+
+  {
+    name: 'manage_webhook',
+    description: `Register, list, or remove a webhook endpoint so BriefGate pushes intake events to your service instead of you polling for them.
+
+Use this ONLY if you control a service that can receive public HTTPS requests. An agent running in a terminal cannot — for that case do not register anything and check on a schedule with get_intake_status instead. A registered endpoint that cannot receive produces failing deliveries and a false impression that the work is being watched.
+
+action="create" returns a "secret" exactly once. Store it: it is needed to verify the signature on every delivery (use verifyWebhookSignature from @briefgate/mcp/webhook) and it cannot be retrieved again.
+
+Events: intake.completed (all required items in — the one to act on), item.submitted (a single item arrived), client.viewed (the client opened the portal), chase.bounced (a reminder failed to deliver), intake.stalled (fires only when the intake sets max_reminders; without it this event never arrives).`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['create', 'list', 'delete'],
+          description: 'What to do. "list" needs no other argument.',
+        },
+        url: {
+          type: 'string',
+          description: 'HTTPS endpoint to deliver to. Required for action="create".',
+        },
+        events: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: ['item.submitted', 'intake.completed', 'client.viewed', 'chase.bounced', 'intake.stalled'],
+          },
+          description:
+            'Events to receive. Required for action="create". For "tell me when the client is done", this is ["intake.completed"].',
+        },
+        format: {
+          type: 'string',
+          enum: ['raw', 'slack', 'discord'],
+          description:
+            'Payload shape. "raw" (default) is the signed BriefGate envelope; "slack" and "discord" post a message those services render directly.',
+        },
+        webhook_id: {
+          type: 'string',
+          description: 'Endpoint to remove. Required for action="delete".',
+        },
+      },
+      required: ['action'],
     },
   },
 ];
@@ -832,7 +946,69 @@ export async function callAddItems(
   return { text: JSON.stringify(result, null, 2) };
 }
 
+export async function callUpdateItem(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = updateItemSchema.safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const { intake_id, item_key, ...changes } = parsed.data;
+  const result = await updateItem(config, intake_id, item_key, changes);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+export async function callManageWebhook(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = z
+    .object({
+      action: z.enum(['create', 'list', 'delete']),
+      url: z.string().min(1).optional(),
+      events: z
+        .array(z.enum(['item.submitted', 'intake.completed', 'client.viewed', 'chase.bounced', 'intake.stalled']))
+        .min(1)
+        .optional(),
+      format: z.enum(['raw', 'slack', 'discord']).optional(),
+      webhook_id: z.string().min(1).optional(),
+    })
+    .strict()
+    .safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+  const { action, url, events, format, webhook_id: webhookId } = parsed.data;
+
+  // Checked here rather than in the schema so the message names the action the
+  // caller actually asked for; a discriminated union would report the failure
+  // against every branch at once.
+  if (action === 'create') {
+    if (!url || !events) {
+      return { text: 'manage_webhook action="create" needs both `url` and `events`.', isError: true };
+    }
+    const created = await createWebhook(config, { url, events, ...(format ? { format } : {}) });
+    return {
+      text: JSON.stringify(
+        {
+          ...created,
+          note: 'Store `secret` now — it verifies every delivery signature and is returned only on creation.',
+        },
+        null,
+        2,
+      ),
+    };
+  }
+
+  if (action === 'delete') {
+    if (!webhookId) {
+      return { text: 'manage_webhook action="delete" needs `webhook_id`.', isError: true };
+    }
+    return { text: JSON.stringify(await deleteWebhook(config, webhookId), null, 2) };
+  }
+
+  return { text: JSON.stringify(await listWebhooks(config), null, 2) };
+}
 
 export async function executeTool(
   name: string,
@@ -854,6 +1030,10 @@ export async function executeTool(
       return callListIntakes(config, args);
     case 'add_items':
       return callAddItems(config, args);
+    case 'update_item':
+      return callUpdateItem(config, args);
+    case 'manage_webhook':
+      return callManageWebhook(config, args);
     default:
       return { text: `Unknown tool: ${name}`, isError: true };
   }

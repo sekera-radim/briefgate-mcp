@@ -186,6 +186,54 @@ items:
 
 Returns the updated intake.
 
+### `update_item`
+
+Change an item's definition after the intake was sent — the type, label, help text or constraints. Use this when you asked for the wrong thing, e.g. you requested an image but the client has a PDF.
+
+```
+intake_id: "in_8f3k"
+item_key: "logo"
+type: "file"                        // was "image"
+constraints: { formats: ["pdf","ai","svg"] }
+discard_submitted_value: false      // true is required if the change invalidates what the client already sent
+```
+
+Returns the updated item. If the client already submitted a value that the new definition would reject, the call fails with `item_answer_would_be_discarded` until you pass `discard_submitted_value: true`.
+
+### `manage_webhook`
+
+Register, list or remove a webhook endpoint so events are pushed to your service instead of you polling.
+
+```
+action: "create"                    // create | list | delete
+url: "https://your.service/hooks/briefgate"
+events: ["intake.completed"]
+format: "raw"                       // raw | slack | discord
+```
+
+`action: "create"` returns a `secret` **once** — store it, it verifies every delivery signature and cannot be retrieved again. Remove with `action: "delete"` and `webhook_id`.
+
+Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
+
+## Knowing when the client is done
+
+Nothing pushes to an MCP client on its own — MCP is request/response, so the server cannot wake your agent when the client finishes. `define_intake` therefore returns a `follow_up` block naming the mechanism that fits your setup:
+
+```jsonc
+"follow_up": {
+  "recommended": "schedule",        // or "webhook" when an endpoint already exists
+  "webhook": { "active_endpoints": 0, "events": ["intake.completed", "item.submitted"],
+               "register_with": "manage_webhook" },
+  "schedule": { "check_with": "get_intake_status", "every_hours": 24,
+                "until": "2026-10-01T08:00:00.000Z" }
+}
+```
+
+- **You run a service** → register a webhook with `manage_webhook` and act on `intake.completed`.
+- **You are an agent in a terminal** → set up a recurring check that calls `get_intake_status` every `every_hours` hours until `until`. A cron entry, a systemd timer, or your agent host's own scheduler all work.
+
+The cadence tightens near the deadline (24h normally, 12h inside a week, 6h inside two days) and is not tied to the reminder schedule: a client can submit everything at 2am having never opened a reminder.
+
 ## End-to-end example
 
 ```
@@ -196,14 +244,19 @@ You are a web development agent. When you need client assets:
    Use type=secret for passwords/credentials.
    The chase engine runs automatically — do not poll more often than once per day.
 
-2. When the intake.completed webhook arrives (or after checking get_intake_status),
+2. Read follow_up in the response and set up how you will hear back:
+   register a webhook with manage_webhook if you have an HTTPS endpoint,
+   otherwise schedule a get_intake_status check at follow_up.schedule.every_hours.
+
+3. When intake.completed arrives (or the scheduled check reports "completed"),
    call get_intake_results. Download file URLs within 24 hours.
    Store secrets immediately — they are one-time.
 
-3. If a submitted asset does not meet requirements (blurry logo, broken URL),
+4. If a submitted asset does not meet requirements (blurry logo, broken URL),
    call request_revision with a clear note for the client.
+   If the client has the asset in another form, call update_item to change the type.
 
-4. If the client is unresponsive after 9 days, call send_chase with channel="sms"
+5. If the client is unresponsive after 9 days, call send_chase with channel="sms"
    (only if a phone number was collected).
 ```
 
