@@ -111,6 +111,9 @@ Create a new client intake — a branded portal where the client submits the ass
 ```
 project_name: "Website for John Finance"
 client: { email: "john@example.com", name: "John", language: "cs" }
+// also_notify: [{ email: "jane@example.com", name: "Jane" }]
+//   Others at the client who get the same link and the same reminders — either of
+//   them can supply the material. Each gets their own email; nobody sees the rest.
 due_date: "2026-08-15"
 branding: { accent_color: "#1B2A4A", sender_name: "Radim" }
 chase_schedule: "default"   // default | gentle | aggressive | custom | off

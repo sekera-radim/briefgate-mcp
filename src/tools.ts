@@ -152,6 +152,16 @@ const clientSchema = z
       .string()
       .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
       .optional(),
+    // Other people at the client who get the same link and the same reminders.
+    also_notify: z
+      .array(
+        z.object({
+          email: z.string().email().max(320),
+          name: z.string().trim().min(1).max(200).optional(),
+        }),
+      )
+      .max(4)
+      .optional(),
   })
   .strict();
 
@@ -313,6 +323,23 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
             phone: {
               type: 'string',
               description: 'E.164 phone number (e.g. +420601123456) — required for SMS reminders.',
+            },
+            also_notify: {
+              type: 'array',
+              description:
+                'Other people who should receive the same invitation and the same reminders, through the ' +
+                'same portal link — two directors of one company, say, where it does not matter which of ' +
+                'them supplies the material. Each address gets its own message (nobody sees the others) ' +
+                'and its own bounce state, so one dead address does not stop the rest being chased. ' +
+                'At most 4, on top of the primary client.',
+              items: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string', description: 'Their email address.' },
+                  name: { type: 'string', description: 'Their name, used to address their copy.' },
+                },
+                required: ['email'],
+              },
             },
           },
           required: ['email', 'name'],
