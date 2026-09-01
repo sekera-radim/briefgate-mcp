@@ -1009,7 +1009,8 @@ describe('tool annotations', () => {
       expect(tool.annotations?.title, `${tool.name} has no annotations.title`).toBeTruthy();
       expect(typeof tool.annotations?.readOnlyHint, `${tool.name}`).toBe('boolean');
       expect(typeof tool.annotations?.destructiveHint, `${tool.name}`).toBe('boolean');
-      // Every one of them reaches the BriefGate API over the network.
+      // Every tool reaches the BriefGate API over the network — `logout`
+      // included, now that it best-effort revokes the key server-side.
       expect(tool.annotations?.openWorldHint, `${tool.name}`).toBe(true);
     }
   });
@@ -1027,8 +1028,8 @@ describe('tool annotations', () => {
     expect(results?.annotations?.destructiveHint).toBe(true);
   });
 
-  it('warns before the three tools that can throw work away', () => {
+  it('warns before the tools that can throw work away', () => {
     const destructive = TOOLS.filter(t => t.annotations?.destructiveHint).map(t => t.name).sort();
-    expect(destructive).toEqual(['get_intake_results', 'manage_webhook', 'update_item']);
+    expect(destructive).toEqual(['get_intake_results', 'logout', 'manage_webhook', 'update_item']);
   });
 });

@@ -1,9 +1,10 @@
-// Tool definitions, Zod validation, and execute functions for all 9 BriefGate MCP tools.
+// Tool definitions, Zod validation, and execute functions for all 11 BriefGate MCP tools.
 // TOOLS is the JSON-schema array sent to the MCP client in ListTools.
 // executeTool dispatches CallTool requests to typed execute functions.
 
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import { hostname } from 'node:os';
 import {
   type BriefGateConfig,
   createIntake,
@@ -18,6 +19,7 @@ import {
   createWebhook,
   deleteWebhook,
 } from './client.js';
+import { login, logout } from './login.js';
 
 // ─── Shared Zod schemas (exported for testing) ────────────────────────────────
 
@@ -940,6 +942,53 @@ Events: intake.completed (all required items in — the one to act on), item.sub
       required: ['action'],
     },
   },
+  {
+    name: 'login',
+    title: 'Sign in to BriefGate',
+    // Not idempotent: a call while nothing is stored starts a brand new
+    // device-authorization flow (a new code) rather than returning the same
+    // result twice, and one call after the code was approved actually mutates
+    // local state — it writes the credentials file.
+    annotations: {
+      title: 'Sign in to BriefGate',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    description: `Sign in without pasting an API key, the same way \`snyk_auth\` works: this opens a browser page where a human approves this device, then stores the issued key locally.
+
+Call this whenever a tool reports "Not signed in" or that the stored key was revoked or expired.
+
+This is a TWO-PHASE tool because approval can take minutes — longer than a single tool call should block for:
+1. The first call starts the sign-in and returns immediately with a URL and a short code (e.g. "WDJB-MJHT"). Tell the user to open the URL and confirm the code; a browser is also opened automatically when possible.
+2. Call \`login\` again (no arguments change) to check progress. While the human hasn't approved yet, it replies that it's still waiting. Once approved, the same call reports success and the key is saved — no further action needed, other tools start working immediately.
+
+Do not wait silently for minutes on one call — call this tool again after telling the user to approve, and again if they say they've clicked Allow.
+
+Has no effect if a key is already supplied via the \`--api-key\` flag or the \`BRIEFGATE_API_KEY\` environment variable — those always take priority over a locally stored one, so this tool says so instead of running the flow. Not available when this server is running as the shared hosted endpoint (mcp.briefgate.dev): there, connecting a client already triggers OAuth automatically.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'logout',
+    title: 'Sign out of BriefGate',
+    annotations: {
+      title: 'Sign out of BriefGate',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    description:
+      'Remove the API key `login` stored locally for this BriefGate server, and best-effort revoke it on the server too (a `DELETE /v1/keys/current` call using that same key). If the revoke call fails — no network, the API is unreachable — the local copy is still removed; the response says so and points at the BriefGate dashboard to revoke it there instead. Not available when this server is running as the shared hosted endpoint.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
 ];
 
 // ─── Tool result type ─────────────────────────────────────────────────────────
@@ -1248,10 +1297,55 @@ export async function callManageWebhook(
   return { text: JSON.stringify(await listWebhooks(config), null, 2) };
 }
 
+// ─── login / logout ────────────────────────────────────────────────────────
+//
+// Unlike every other tool here, these never send the account's own API key
+// as a Bearer token (login talks to the unauthenticated device-authorization
+// endpoints; logout sends the key being revoked, not config.apiKey) — they
+// must work with no API key configured at all, that's the whole point.
+
+async function callLogin(config: BriefGateConfig, context: ToolContext): Promise<ToolResult> {
+  if (config.apiKeySource === 'flag' || config.apiKeySource === 'env' || config.apiKeySource === 'header') {
+    const via =
+      config.apiKeySource === 'flag'
+        ? '--api-key'
+        : config.apiKeySource === 'env'
+          ? 'the BRIEFGATE_API_KEY environment variable'
+          : 'the Authorization header this request was sent with';
+    return {
+      text: `An API key is already configured via ${via} — it always takes priority, so login would have no effect. Remove it first to sign in with a different account.`,
+    };
+  }
+  const clientName = `${context.clientName ?? 'MCP client'} on ${hostname()}`;
+  const result = await login({ baseUrl: config.baseUrl, clientName });
+  if (result.apiKey) {
+    // Update the shared config object in place so the very next tool call in
+    // this same process picks up the new key immediately. Without this, a
+    // long-running stdio session would report "Signed in" and then every
+    // following tool call would still say "Not signed in" until restarted —
+    // `login` saved the key to disk, but nothing had re-read it into memory.
+    config.apiKey = result.apiKey;
+    config.apiKeySource = 'file';
+  }
+  return { text: result.text };
+}
+
+async function callLogout(config: BriefGateConfig): Promise<ToolResult> {
+  return { text: await logout(config.baseUrl) };
+}
+
+// ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+export interface ToolContext {
+  /** MCP client name from `initialize`, used only to label the login device. */
+  clientName?: string;
+}
+
 export async function executeTool(
   name: string,
   config: BriefGateConfig,
   args: unknown,
+  context: ToolContext = {},
 ): Promise<ToolResult> {
   switch (name) {
     case 'define_intake':
@@ -1272,6 +1366,10 @@ export async function executeTool(
       return callUpdateItem(config, args);
     case 'manage_webhook':
       return callManageWebhook(config, args);
+    case 'login':
+      return callLogin(config, context);
+    case 'logout':
+      return callLogout(config);
     default:
       return { text: `Unknown tool: ${name}`, isError: true };
   }

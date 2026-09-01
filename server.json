@@ -8,21 +8,21 @@
     "url": "https://github.com/sekera-radim/briefgate-mcp",
     "source": "github"
   },
-  "version": "0.7.4",
+  "version": "0.7.5",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@briefgate/mcp",
-      "version": "0.7.4",
+      "version": "0.7.5",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "BRIEFGATE_API_KEY",
-          "description": "BriefGate API key (bg_live_... or bg_test_...). Obtain from the dashboard at briefgate.dev.",
-          "isRequired": true,
+          "description": "BriefGate API key (bg_live_... or bg_test_...). Optional: run `npx -y @briefgate/mcp login` once to sign in without one.",
+          "isRequired": false,
           "isSecret": true
         },
         {

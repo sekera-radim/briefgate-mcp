@@ -5,6 +5,13 @@
 export interface BriefGateConfig {
   apiKey: string;
   baseUrl: string;
+  /**
+   * How `apiKey` was obtained. Never read by apiRequest — it exists only so
+   * the `login` tool can tell whether calling it would do anything: a key
+   * from `--api-key`/env/an explicit header always overrides the locally
+   * stored one, so signing in again would have no effect until it's removed.
+   */
+  apiKeySource?: 'flag' | 'env' | 'header' | 'file' | 'none';
 }
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
@@ -196,6 +203,13 @@ export async function apiRequest<T>(
   }
 }
 
+// Exact text of the 401 case below — exported so callers can recognize this
+// specific failure (e.g. to rewrite it into "call login again", or to turn a
+// hosted MCP tool response into a real HTTP 401 for OAuth clients) without
+// parsing prose.
+export const AUTH_FAILED_MESSAGE =
+  'Authentication failed — verify your BRIEFGATE_API_KEY is correct and has not been revoked.';
+
 async function throwApiError(res: Response): Promise<never> {
   let message = '';
   let retryAfter = '';
@@ -209,9 +223,7 @@ async function throwApiError(res: Response): Promise<never> {
 
   switch (res.status) {
     case 401:
-      throw new Error(
-        'Authentication failed — verify your BRIEFGATE_API_KEY is correct and has not been revoked.',
-      );
+      throw new Error(AUTH_FAILED_MESSAGE);
     case 402:
       throw new Error(
         `Plan limit reached: ${message || 'quota exceeded'} — upgrade your plan or reduce scope.`,

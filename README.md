@@ -14,37 +14,28 @@ Agent: keeps building the website ✅
 
 ## Quickstart — Claude Code
 
-**1. Get an API key** at [briefgate.dev](https://briefgate.dev) (free tier available, no card required):
+**Option 1 — sign in, nothing to copy:**
 
-**2. Register the MCP server:**
+```bash
+claude mcp add briefgate -- npx -y @briefgate/mcp
+npx -y @briefgate/mcp login
+```
+
+`login` prints a short code and a URL, tries to open your browser to it, and waits (up to 10 minutes) for you to click **Allow**. On success it prints `Signed in as <account>` and exits; the key lands in `~/.briefgate/credentials.json` (mode `0600`) and the server picks it up automatically — no restart, nothing to paste into config. `npx -y @briefgate/mcp logout` removes it again and best-effort revokes it on the server too.
+
+Prefer to sign in from inside the agent instead of a terminal? Skip the `login` command above and just ask Claude Code to "call the briefgate `login` tool" instead — same flow, one call at a time. See [Sign in without an API key](#sign-in-without-an-api-key).
+
+Prefer connecting straight to the hosted endpoint instead of running the package locally? `claude mcp add --transport http briefgate https://mcp.briefgate.dev/mcp` walks you through OAuth in the browser — see [Hosted endpoint + OAuth](#hosted-endpoint--oauth) below.
+
+**Option 2 — paste an API key** (for CI, scripts, or if you'd rather manage the key yourself). Get one at [briefgate.dev](https://briefgate.dev) (free tier available, no card required):
 
 ```bash
 claude mcp add briefgate \
   -e BRIEFGATE_API_KEY=bg_live_... \
-  -- npx @briefgate/mcp
+  -- npx -y @briefgate/mcp
 ```
 
 Or add manually to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "briefgate": {
-      "command": "npx",
-      "args": ["@briefgate/mcp"],
-      "env": {
-        "BRIEFGATE_API_KEY": "bg_live_..."
-      }
-    }
-  }
-}
-```
-
-**3. Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 7 tools.
-
-## Quickstart — Cursor / Codex / other MCP clients
-
-Add to your MCP config (usually `.cursor/mcp.json` or similar):
 
 ```json
 {
@@ -60,14 +51,78 @@ Add to your MCP config (usually `.cursor/mcp.json` or similar):
 }
 ```
 
+`BRIEFGATE_API_KEY` (or `--api-key` on the command line), if set, always takes precedence over a key `login` stored locally — running `login` while one is configured just says so instead of doing anything.
+
+**Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 11 tools.
+
+## Quickstart — Cursor / Codex / other MCP clients
+
+`login` / `logout` work the same way for any client that runs the package locally: register it with no key at all, then either run `npx -y @briefgate/mcp login` yourself or ask the agent to call the `login` tool.
+
+```json
+{
+  "mcpServers": {
+    "briefgate": {
+      "command": "npx",
+      "args": ["-y", "@briefgate/mcp"]
+    }
+  }
+}
+```
+
+Or paste an API key instead, add to your MCP config (usually `.cursor/mcp.json` or similar):
+
+```json
+{
+  "mcpServers": {
+    "briefgate": {
+      "command": "npx",
+      "args": ["-y", "@briefgate/mcp"],
+      "env": {
+        "BRIEFGATE_API_KEY": "bg_live_..."
+      }
+    }
+  }
+}
+```
+
+## Sign in without an API key
+
+Two ways to get a key onto this machine without pasting one — both run the same device-authorization flow (RFC 8628) against the same credential file, so pick whichever fits how you're using the package.
+
+**From a terminal — the `login` / `logout` subcommands:**
+
+```bash
+npx -y @briefgate/mcp login     # prints a code + URL, waits for approval, saves the key
+npx -y @briefgate/mcp logout    # removes the local key, best-effort revokes it remotely
+```
+
+`login` blocks until you approve it (or it times out at 10 minutes), then prints `Signed in as <account_name>` and exits `0` — or prints why it didn't work (denied, expired, an error) and exits `1`. `logout` always removes the local copy; it also sends `DELETE /v1/keys/current` using that same key to revoke it server-side, and if that call fails (no network, API unreachable) it says so and points at the BriefGate dashboard instead of leaving you unsure whether the key is still live.
+
+**From an agent — the `login` / `logout` tools** (see [Tools](#tools)):
+
+Same flow, for a client that can't block a terminal on your click. `login` is **two-phase** because a tool call can't sit open for minutes:
+
+1. The first call starts the flow and returns immediately with the code and URL. A browser is opened automatically where possible.
+2. Call `login` again — any time, or once you've approved it — to check progress. While it's still waiting, it says so; once approved, that same call reports success and the key is saved. No restart needed: the very next tool call is signed in.
+
+`logout` as a tool does exactly what the subcommand does, including the best-effort remote revoke.
+
+**Either way**, the key lands in `~/.briefgate/credentials.json` (directory mode `0700`, file mode `0600`; override the path with `BRIEFGATE_CREDENTIALS_FILE`), keyed by which BriefGate server it's for so a staging `BRIEFGATE_BASE_URL` and production never collide. An explicit key always wins over a stored one — `--api-key`, then `BRIEFGATE_API_KEY`, then whatever `login` last saved — and `login` says so instead of running the flow when one of those is already set. Neither the subcommands nor the tools apply to the shared hosted endpoint (`mcp.briefgate.dev`) — see [Hosted endpoint + OAuth](#hosted-endpoint--oauth), where connecting a client triggers real OAuth instead.
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `BRIEFGATE_API_KEY` | Yes | — | API key (`bg_live_...` or `bg_test_...`). Obtain from the BriefGate dashboard. |
+| `BRIEFGATE_API_KEY` | No | — | API key (`bg_live_...` or `bg_test_...`). Takes precedence over a credential stored by `login`. If nothing is configured, tool calls fail with a message pointing at `login`. |
 | `BRIEFGATE_BASE_URL` | No | `https://api.briefgate.dev` | Override for staging or local development. |
+| `BRIEFGATE_CREDENTIALS_FILE` | No | `~/.briefgate/credentials.json` | Where `login`/`logout` store the key. Mainly for tests and unusual setups. |
 | `BRIEFGATE_MCP_HTTP` | No | — | Set to `1` to start Streamable HTTP instead of stdio. |
 | `BRIEFGATE_MCP_PORT` | No | `3000` | Port for HTTP mode. |
+| `BRIEFGATE_MCP_PUBLIC_HOST` | No | — | Publishes the server as a shared, multi-customer OAuth endpoint. See [Hosted endpoint + OAuth](#hosted-endpoint--oauth). |
+| `BRIEFGATE_MCP_AUTH_SERVER` | No | `BRIEFGATE_BASE_URL` | The OAuth authorization server advertised to clients in published mode. Defaults to `BRIEFGATE_BASE_URL` for local dev, where they're usually the same address; a real deployment behind a container network sets this explicitly (see below). |
+
+`--api-key bg_live_...` is also accepted on the command line, ahead of `BRIEFGATE_API_KEY` in priority. `login` and `logout` are also accepted as the first command-line argument (`npx @briefgate/mcp login`), instead of `--http`/no flag.
 
 ## HTTP (Streamable HTTP) mode
 
@@ -79,28 +134,60 @@ BRIEFGATE_API_KEY=bg_live_... npx @briefgate/mcp --http --port 3000
 
 The server binds to `127.0.0.1` only and includes DNS-rebinding protection. Behind a reverse proxy, terminate TLS there and forward to the local port — do not expose the port directly.
 
-### Published mode (one endpoint, many customers)
+## Hosted endpoint + OAuth
 
 Set `BRIEFGATE_MCP_PUBLIC_HOST` to the hostname the server is published under and
-it becomes a multi-customer endpoint: each caller sends its own key as
-`Authorization: Bearer bg_live_...`, and the server speaks to the BriefGate API
-as that caller.
+it becomes a shared, multi-customer endpoint: each caller sends its own key as
+`Authorization: Bearer bg_live_...` (an OAuth access token, for this API, *is*
+that same key — see below), and the server speaks to the BriefGate API as that
+caller. The public instance is `https://mcp.briefgate.dev/mcp`.
 
 ```bash
 BRIEFGATE_MCP_PUBLIC_HOST=mcp.example.com npx @briefgate/mcp --http --port 3000
 ```
 
-Three things change, on purpose:
+Several things change, on purpose:
 
 - the listener binds `0.0.0.0` and the Host guard accepts that name, because a
   server behind a reverse proxy is reached by its public name;
-- **the `BRIEFGATE_API_KEY` fallback is switched off.** Leaving it on would let
-  an anonymous caller spend the operator's key;
-- requests still reach `initialize` and `tools/list` without a key, so a client
-  or registry can read the tool list before anyone has signed up. A tool call
-  without a key fails with a sentence saying what to send.
+- **the `BRIEFGATE_API_KEY` fallback and the local `login` credential are both
+  switched off.** Leaving either on would let an anonymous caller spend the
+  operator's key, or read whatever the machine's own `login` last stored;
+- **`login`/`logout`, tools and subcommands alike, are unavailable** —
+  connecting a client triggers real OAuth instead, described below;
+- the server becomes an OAuth 2.1 *resource server*, per the MCP authorization
+  spec, so an OAuth-aware client can add it with nothing but the URL. This
+  package never runs the authorization flow itself — it only advertises where
+  to find it and enforces that a request carries a token:
+  - it serves `GET /.well-known/oauth-protected-resource` (RFC 9728), and the
+    same content again under `/.well-known/oauth-protected-resource/mcp` (the
+    resource-scoped path the MCP spec also has clients try), both with open
+    CORS and naming the BriefGate API as the authorization server — see
+    `BRIEFGATE_MCP_AUTH_SERVER` above;
+  - **every** MCP request now needs a Bearer token — including `initialize`
+    and `tools/list`, which used to work without one so a registry could
+    introspect the tool list. One with no token gets HTTP `401` and a
+    `WWW-Authenticate: Bearer resource_metadata="https://<host>/.well-known/oauth-protected-resource"`
+    header, which is the signal an OAuth client uses to start signing in;
+  - if a tool call's key turns out to be expired or revoked (the API answers
+    `401`), the response is rewritten into a real HTTP `401` with the same
+    header plus `error="invalid_token"`, rather than an ordinary tool error —
+    so the client knows to refresh rather than just reporting the call failed.
 
-The public instance is `https://mcp.briefgate.dev/mcp`.
+What a connecting client actually does, against the authorization server named
+in that metadata: standard OAuth 2.1 discovery
+(`GET /.well-known/oauth-authorization-server`), dynamic client registration
+(`POST /v1/oauth/register`), then an authorization-code exchange with PKCE
+(S256) at `POST /v1/oauth/token` — no client secret, since MCP clients are
+public clients — and `POST /v1/oauth/revoke` to end a session. None of that is
+this package's concern; it only has to be a correct resource server pointing
+at it. The access token that comes out the other end is a `bg_live_...` key
+like any other, with a one-hour expiry the API enforces.
+
+None of this applies without `BRIEFGATE_MCP_PUBLIC_HOST`: a local `--http` run
+keeps behaving exactly as before, including an absent key reaching
+`initialize`/`tools/list` and a plain `Authorization: Bearer ...` header
+working with no OAuth involved.
 
 ## Tools
 
@@ -241,6 +328,18 @@ format: "raw"                       // raw | slack | discord
 Because an agent receives the secret in a tool result, it can come to rest wherever that conversation is stored. There is no rotation endpoint: if a transcript leaks, delete the endpoint and create a new one to get a fresh secret.
 
 Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
+
+### `login`
+
+Sign in without an API key — see [Sign in without an API key](#sign-in-without-an-api-key). Takes no arguments.
+
+Call it whenever another tool reports "Not signed in" or that the stored key was revoked or expired. The first call starts a device-authorization flow and returns a URL and a short code immediately; call it again (any time) to check whether it's been approved yet. Has no effect — it says so instead — if `--api-key` or `BRIEFGATE_API_KEY` already supplies a key. Not available on the hosted endpoint. Same flow as running `npx @briefgate/mcp login` from a terminal (which blocks until approved instead of needing a second call) — see [Sign in without an API key](#sign-in-without-an-api-key).
+
+### `logout`
+
+Removes the API key `login` stored locally for this BriefGate server, and best-effort revokes it on the server too. Takes no arguments.
+
+If the revoke call fails — no network, the API unreachable — the local copy is still removed; the response says so and points at the BriefGate dashboard to revoke it there instead. Not available on the hosted endpoint. Same effect as running `npx @briefgate/mcp logout` from a terminal — see [Sign in without an API key](#sign-in-without-an-api-key).
 
 ## Decisions — questions for the developer
 
