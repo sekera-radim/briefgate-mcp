@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.sekera-radim/briefgate",
   "title": "BriefGate",
-  "description": "BriefGate MCP server \u2014 your coding agent asks the client for logos, copy and credentials, BriefGate chases them until they arrive.",
+  "description": "Your coding agent asks the client for logos, copy and credentials; BriefGate chases them for you.",
   "websiteUrl": "https://briefgate.dev",
   "repository": {
     "url": "https://github.com/sekera-radim/briefgate-mcp",

@@ -51,5 +51,8 @@ jobs:
       - name: Log in with GitHub OIDC
         run: ./mcp-publisher login github-oidc
 
+      # The registry validates server.json server-side and rejects the whole
+      # submission on any single field. The first attempt failed on
+      # description: it caps at 100 characters and ours was 130. Keep it short.
       - name: Publish
         run: ./mcp-publisher publish
