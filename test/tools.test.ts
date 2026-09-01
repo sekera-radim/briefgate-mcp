@@ -165,7 +165,7 @@ describe('callDefineIntake', () => {
 
     const result: ToolResult = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
     });
 
@@ -187,6 +187,38 @@ describe('callDefineIntake', () => {
     expect(result.text).toMatch(/Validation error/);
   });
 
+  // Zod strips unknown keys by default, so a mistyped parameter used to vanish
+  // silently: `send_now` (the field is `send`) was dropped and the invite went
+  // out anyway. The API answers 422 for the same body — failing here reports it
+  // before the request leaves, naming the key.
+  it('rejects an unknown parameter instead of silently dropping it', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+      send_now: false,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/send_now/);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  // The API rejects a nameless client, and an agent that hits that only sees an
+  // opaque 422 after the request has already gone out. Failing here instead
+  // names the field to fill in, and never touches the network.
+  it('rejects a client with no name before calling the API', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/name/i);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
   // The chase cadence is the product's whole point, so the tool must pass the
   // custom interval through rather than quietly dropping an unknown field.
   it('forwards a custom cadence, its unit and the cap to the API', async () => {
@@ -196,7 +228,7 @@ describe('callDefineIntake', () => {
 
     await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       chase_schedule: 'custom',
       chase_interval: 5,
@@ -221,7 +253,7 @@ describe('callDefineIntake', () => {
 
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       chase_schedule: 'custom',
     });
@@ -235,7 +267,7 @@ describe('callDefineIntake', () => {
   it.each([0, -1, 2.5])('rejects a non-positive chase_interval (%s)', async bad => {
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       chase_schedule: 'custom',
       chase_interval: bad,
@@ -248,7 +280,7 @@ describe('callDefineIntake', () => {
   it('rejects an unknown chase_interval_unit', async () => {
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       chase_schedule: 'custom',
       chase_interval: 2,
@@ -260,7 +292,7 @@ describe('callDefineIntake', () => {
   it.each([0, -1, 1001, 2.5])('rejects an invalid max_reminders (%s)', async bad => {
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       max_reminders: bad,
     });
@@ -270,7 +302,7 @@ describe('callDefineIntake', () => {
   it('rejects an unknown chase_schedule', async () => {
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       chase_schedule: 'nag_hourly',
     });
@@ -280,7 +312,7 @@ describe('callDefineIntake', () => {
   it('returns validation error when items contain select without options', async () => {
     const result = await callDefineIntake(config, {
       project_name: 'Test',
-      client: { email: 'c@e.com' },
+      client: { email: 'c@e.com', name: 'Jana Nováková' },
       items: [{ key: 'tier', type: 'select', label: 'Tier' }],
     });
     expect(result.isError).toBe(true);
@@ -290,7 +322,7 @@ describe('callDefineIntake', () => {
   it('returns validation error when item key is "Logo" (uppercase)', async () => {
     const result = await callDefineIntake(config, {
       project_name: 'Test',
-      client: { email: 'c@e.com' },
+      client: { email: 'c@e.com', name: 'Jana Nováková' },
       items: [{ key: 'Logo', type: 'image', label: 'Company logo' }],
     });
     expect(result.isError).toBe(true);
@@ -308,7 +340,7 @@ describe('callDefineIntake', () => {
 
     const args = {
       project_name: 'Same Project',
-      client: { email: 'same@client.com' },
+      client: { email: 'same@client.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image' as const, label: 'Logo' }],
     };
 
@@ -332,7 +364,7 @@ describe('callDefineIntake', () => {
         mockOk({ intake_id: 'in_2', portal_url: 'https://p.briefgate.dev/2', status: 'sent', items: [] }),
       );
 
-    const baseArgs = { project_name: 'Web', client: { email: 'client@firma.cz' } };
+    const baseArgs = { project_name: 'Web', client: { email: 'client@firma.cz', name: 'Jana Nováková' } };
 
     await callDefineIntake(config, {
       ...baseArgs,
@@ -359,7 +391,7 @@ describe('callDefineIntake', () => {
         mockOk({ intake_id: 'in_1', portal_url: 'https://p.briefgate.dev/1', status: 'sent', items: [] }),
       );
 
-    const baseArgs = { project_name: 'Web', client: { email: 'client@firma.cz' } };
+    const baseArgs = { project_name: 'Web', client: { email: 'client@firma.cz', name: 'Jana Nováková' } };
 
     await callDefineIntake(config, {
       ...baseArgs,
@@ -519,7 +551,7 @@ describe('callDefineIntake — cadence notices', () => {
     ok();
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       ...extra,
     });
@@ -566,7 +598,7 @@ describe('callDefineIntake — cadence notices', () => {
     ok();
     await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       max_reminders: 'unlimited',
     });
@@ -577,7 +609,7 @@ describe('callDefineIntake — cadence notices', () => {
   it('rejects a max_reminders string that is not "unlimited"', async () => {
     const result = await callDefineIntake(config, {
       project_name: 'Test Project',
-      client: { email: 'client@example.com' },
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
       max_reminders: 'forever',
     });

@@ -54,12 +54,21 @@ const constraintsSchema = z
     max_count: z.number().int().positive().max(200).optional(),
     transparent_background: z.boolean().optional(),
   })
+  .strict()
   .optional();
 
-const itemOptionSchema = z.object({
-  value: z.string().min(1).max(200),
-  label: z.string().min(1).max(200),
-});
+// Every object below is strict, matching the API's own schemas. Zod strips
+// unknown keys by default, so a mistyped parameter used to vanish between the
+// agent and the request: `send_now: false` (the field is `send`) was dropped
+// and the invite went out anyway, with nothing to tell the agent why. The API
+// answers 422 for the same input, so failing here is the same contract, just
+// reported before the request leaves.
+const itemOptionSchema = z
+  .object({
+    value: z.string().min(1).max(200),
+    label: z.string().min(1).max(200),
+  })
+  .strict();
 
 export const itemDefinitionSchema = z
   .object({
@@ -74,6 +83,7 @@ export const itemDefinitionSchema = z
     options: z.array(itemOptionSchema).max(100).optional(),
     pattern: z.string().max(300).optional(),
   })
+  .strict()
   .superRefine((item, ctx) => {
     if (item.type === 'select' && (!item.options || item.options.length === 0)) {
       ctx.addIssue({
@@ -91,64 +101,79 @@ export const itemDefinitionSchema = z
     }
   });
 
-const clientSchema = z.object({
-  email: z.string().email().max(320),
-  name: z.string().max(200).optional(),
-  language: z.enum(['cs', 'sk', 'pl', 'de', 'es', 'en']).optional(),
-  timezone: z.string().optional(),
-  phone: z
-    .string()
-    .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
-    .optional(),
-});
+const clientSchema = z
+  .object({
+    email: z.string().email().max(320),
+    // Required, and validated here rather than left to the server's 422: every
+    // email opens by addressing the client by name, so an agent that omits it
+    // should be told which field to fill in, not handed an HTTP error.
+    name: z
+      .string()
+      .trim()
+      .min(1, "Client name is required — every email opens by addressing them.")
+      .max(200),
+    language: z.enum(['cs', 'sk', 'pl', 'de', 'es', 'en']).optional(),
+    timezone: z.string().optional(),
+    phone: z
+      .string()
+      .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
+      .optional(),
+  })
+  .strict();
 
-const brandingSchema = z.object({
-  logo_url: z.string().url().optional(),
-  accent_color: z
-    .string()
-    .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Expected a hex color like #1B2A4A')
-    .optional(),
-  sender_name: z.string().min(1).max(100).optional(),
-  reply_to: z.string().email().optional(),
-});
+const brandingSchema = z
+  .object({
+    logo_url: z.string().url().optional(),
+    accent_color: z
+      .string()
+      .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Expected a hex color like #1B2A4A')
+      .optional(),
+    sender_name: z.string().min(1).max(100).optional(),
+      reply_to: z.string().email().optional(),
+  })
+  .strict();
 
-const defineIntakeSchema = z.object({
-  project_name: z.string().min(1).max(200),
-  client: clientSchema,
-  due_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
-    .optional(),
-  branding: brandingSchema.optional(),
-  chase_schedule: z.enum(['default', 'gentle', 'aggressive', 'custom', 'off']).optional(),
-  chase_interval: z.number().int().min(1).optional(),
-  chase_interval_unit: z.enum(['minutes', 'hours', 'days']).optional(),
-  respect_quiet_hours: z.boolean().optional(),
-  max_reminders: z.union([z.number().int().min(1).max(1000), z.literal('unlimited')]).optional(),
-  chase_at_time: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a 24-hour local time like "07:00"')
-    .optional(),
-  email_copy: z
-    .object({
-      invite_subject: z.string().min(1).max(200).optional(),
-      invite_intro: z.string().min(1).max(600).optional(),
-      reminder_subject: z.string().min(1).max(200).optional(),
-      reminder_intro: z.string().min(1).max(600).optional(),
-    })
-    .optional(),
-  items: z.array(itemDefinitionSchema).min(1).max(100),
-  template: z.string().max(100).optional(),
-  auto_approve_hours: z.number().int().min(0).max(720).optional(),
-  retention: z
-    .object({
-      mode: z.enum(['days', 'on_delivery']).optional(),
-      days: z.number().int().min(1).max(3650).optional(),
-      anonymize: z.boolean().optional(),
-    })
-    .optional(),
-  send: z.boolean().optional(),
-});
+const defineIntakeSchema = z
+  .object({
+    project_name: z.string().min(1).max(200),
+    client: clientSchema,
+    due_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+      .optional(),
+    branding: brandingSchema.optional(),
+    chase_schedule: z.enum(['default', 'gentle', 'aggressive', 'custom', 'off']).optional(),
+    chase_interval: z.number().int().min(1).optional(),
+    chase_interval_unit: z.enum(['minutes', 'hours', 'days']).optional(),
+    respect_quiet_hours: z.boolean().optional(),
+    max_reminders: z.union([z.number().int().min(1).max(1000), z.literal('unlimited')]).optional(),
+    chase_at_time: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a 24-hour local time like "07:00"')
+      .optional(),
+    email_copy: z
+      .object({
+        invite_subject: z.string().min(1).max(200).optional(),
+        invite_intro: z.string().min(1).max(600).optional(),
+        reminder_subject: z.string().min(1).max(200).optional(),
+        reminder_intro: z.string().min(1).max(600).optional(),
+      })
+      .strict()
+      .optional(),
+    items: z.array(itemDefinitionSchema).min(1).max(100),
+    template: z.string().max(100).optional(),
+    auto_approve_hours: z.number().int().min(0).max(720).optional(),
+    retention: z
+      .object({
+        mode: z.enum(['days', 'on_delivery']).optional(),
+        days: z.number().int().min(1).max(3650).optional(),
+        anonymize: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+      send: z.boolean().optional(),
+  })
+  .strict();
 
 // ─── MCP tool definitions (JSON schema, sent to the MCP client) ───────────────
 
@@ -190,7 +215,12 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
           description: 'Client contact details.',
           properties: {
             email: { type: 'string', description: 'Client email address (required).' },
-            name: { type: 'string', description: 'Client name for personalised emails.' },
+            name: {
+              type: 'string',
+              description:
+                'Client name (required). Every email opens by addressing them by name, ' +
+                'so a blank one sends "Hello," to someone being asked for their admin password.',
+            },
             language: {
               type: 'string',
               enum: ['cs', 'sk', 'pl', 'de', 'es', 'en'],
@@ -207,7 +237,7 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
               description: 'E.164 phone number (e.g. +420601123456) — required for SMS reminders.',
             },
           },
-          required: ['email'],
+          required: ['email', 'name'],
         },
         due_date: {
           type: 'string',

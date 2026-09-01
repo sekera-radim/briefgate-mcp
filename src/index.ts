@@ -5,6 +5,7 @@
 //   --http [--port N]    — Streamable HTTP for remote / multi-session usage
 //     also activated by: BRIEFGATE_MCP_HTTP=1
 
+import { readFileSync } from 'node:fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -53,13 +54,20 @@ const config: BriefGateConfig = {
   baseUrl,
 };
 
+// The version handed to clients in the MCP handshake. Read from package.json
+// rather than repeated here: hand-maintained it had drifted to 0.1.0 while the
+// package shipped 0.3.0, so every client was told the wrong version.
+const PACKAGE_VERSION: string = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+).version;
+
 // ─── Server factory ───────────────────────────────────────────────────────────
 
 // Returns a fresh Server instance bound to the shared config.
 // In HTTP mode we create one Server per request (stateless pattern).
 function buildServer(): Server {
   const server = new Server(
-    { name: '@briefgate/mcp', version: '0.1.0' },
+    { name: '@briefgate/mcp', version: PACKAGE_VERSION },
     { capabilities: { tools: {} } },
   );
 
