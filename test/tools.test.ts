@@ -766,3 +766,87 @@ describe('callManageWebhook', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// ─── decisions ────────────────────────────────────────────────────────────────
+//
+// An agent must be able to pose a question it cannot answer and keep working.
+// What these hold onto is that a proposal is only ever accepted where it can
+// actually mean something — otherwise it is a value going nowhere.
+
+describe('decision items', () => {
+  const priceDecision = (extra: Record<string, unknown> = {}) => ({
+    key: 'discount_price',
+    type: 'select',
+    assignee: 'owner',
+    label: 'What does the discounted subscription cost?',
+    options: [
+      { value: '19', label: '$19/month' },
+      { value: '29', label: '$29/month' },
+    ],
+    ...extra,
+  });
+
+  const define = (item: Record<string, unknown>) =>
+    callDefineIntake(config, {
+      project_name: 'P',
+      client: { email: 'c@example.com', name: 'Petr' },
+      items: [item],
+    });
+
+  it('accepts a proposal on an owner select', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockOk({ intake_id: 'in_1', portal_url: 'u', status: 'sent' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await define(priceDecision({ proposed: { value: '19', rationale: 'benchmark' } }));
+    expect(res.isError).toBeFalsy();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const sent = JSON.parse(String(init.body)) as { items: Record<string, unknown>[] };
+    expect(sent.items[0]!['proposed']).toEqual({ value: '19', rationale: 'benchmark' });
+  });
+
+  it('accepts multiselect with an array proposal', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockOk({ intake_id: 'in_1', portal_url: 'u', status: 'sent' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await define(
+      priceDecision({ type: 'multiselect', proposed: { value: ['19', '29'] }, constraints: { max_count: 2 } }),
+    );
+    expect(res.isError).toBeFalsy();
+  });
+
+  it('refuses a proposal on a client item before it reaches the API', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await define(priceDecision({ assignee: 'client', proposed: { value: '19' } }));
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/assignee=owner/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a proposal on a type with no options', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await define({
+      key: 'note',
+      type: 'text',
+      assignee: 'owner',
+      label: 'Note',
+      proposed: { value: 'x' },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/select or type=multiselect/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('requires options on a multiselect', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await define({ key: 'langs', type: 'multiselect', label: 'Languages' });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/non-empty options/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

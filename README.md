@@ -217,6 +217,33 @@ Because an agent receives the secret in a tool result, it can come to rest where
 
 Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
 
+## Decisions — questions for the developer
+
+An agent building something hits things only the account holder can settle: *does the discounted plan cost $19 or $29?* Stopping to wait wastes the run; picking silently buries the assumption. A decision is the third option — pose the question, record the answer you are proceeding on, keep building.
+
+```jsonc
+{ "key": "discount_price", "type": "select", "assignee": "owner",
+  "label": "What does the discounted subscription cost?",
+  "options": [ { "value": "19", "label": "$19/month" },
+               { "value": "29", "label": "$29/month" } ],
+  "proposed": { "value": "19", "rationale": "matches the competitor we benchmarked" } }
+```
+
+`type: "multiselect"` takes several answers, bounded by `constraints.min_count` / `max_count`.
+
+The proposal is stored apart from the real answer, so it can never be mistaken for one the developer gave — and it survives being overruled, which is the point: in three months you can still see that $19 was assumed, not agreed. Read it back from `get_intake_results`:
+
+```jsonc
+"results": { "discount_price": "19" },
+"meta": { "discount_price": { "decided_by": "agent_proposal", "proposed_value": "19" } }
+```
+
+`decided_by` is `"owner"` once a person has settled it and `"agent_proposal"` while it is still your own pick. A proposed decision comes back even without `include_pending` — you need the assumption you are building on. It does not bump `revision`, so an `only_new` read surfaces exactly the decisions someone has since answered.
+
+**You cannot answer your own question.** The answer endpoint takes a dashboard session, not an API key: if the agent could confirm its own proposal and have it recorded as the developer's, the distinction would be worth nothing. Decisions are answered in the BriefGate dashboard.
+
+Owner items never reach the client portal, never appear in a reminder, and never hold up completion — the intake is finished when the *client* is finished.
+
 ## Knowing when the client is done
 
 Nothing pushes to an MCP client on its own — MCP is request/response, so the server cannot wake your agent when the client finishes. `define_intake` therefore returns a `follow_up` block naming the mechanism that fits your setup:

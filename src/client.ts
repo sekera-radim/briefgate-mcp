@@ -17,6 +17,7 @@ export type ItemType =
   | 'image'
   | 'color_list'
   | 'select'
+  | 'multiselect'
   | 'boolean'
   | 'url'
   | 'secret'
@@ -55,6 +56,16 @@ export interface ItemDefinition {
   schema?: Record<string, unknown>;
   options?: ItemOption[];
   pattern?: string;
+  assignee?: 'client' | 'owner';
+  /** The answer an agent is proceeding on for an owner decision it cannot make. */
+  proposed?: { value: string | string[]; rationale?: string };
+}
+
+export interface FollowUpAdvice {
+  recommended: 'webhook' | 'schedule';
+  reason: string;
+  webhook: { active_endpoints: number; events: string[]; register_with: string };
+  schedule: { check_with: string; every_hours: number; until: string };
 }
 
 export interface IntakeCreated {
@@ -62,6 +73,7 @@ export interface IntakeCreated {
   portal_url: string;
   status: IntakeStatus;
   items: Array<{ key: string; status: ItemStatus }>;
+  follow_up?: FollowUpAdvice;
 }
 
 export interface IntakeStatusResult {

@@ -38,6 +38,7 @@ const itemTypeSchema = z.enum([
   'image',
   'color_list',
   'select',
+  'multiselect',
   'boolean',
   'url',
   'secret',
@@ -86,9 +87,38 @@ export const itemDefinitionSchema = z
     schema: z.record(z.unknown()).optional(),
     options: z.array(itemOptionSchema).max(100).optional(),
     pattern: z.string().max(300).optional(),
+    // The answer you are proceeding on for a decision you cannot make yourself.
+    proposed: z
+      .object({
+        value: z.union([z.string().min(1).max(200), z.array(z.string().min(1).max(200)).max(100)]),
+        rationale: z.string().max(1000).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((item, ctx) => {
+    if (item.type === 'multiselect' && (!item.options || item.options.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['options'],
+        message: 'type=multiselect requires a non-empty options array',
+      });
+    }
+    if (item.proposed && item.assignee !== 'owner') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['proposed'],
+        message: 'proposed is only for assignee=owner decisions — a client item is answered by the client',
+      });
+    }
+    if (item.proposed && item.type !== 'select' && item.type !== 'multiselect') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['proposed'],
+        message: `proposed needs type=select or type=multiselect, not ${item.type}`,
+      });
+    }
     if (item.type === 'select' && (!item.options || item.options.length === 0)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -229,7 +259,11 @@ Example:
   ]
 }
 
-Item types: text, longtext, file, file_list, image, color_list, select (requires options[]), boolean, url, secret (encrypted; revealed exactly once — store the value on the first read), structured (requires schema with JSON Schema).
+Item types: text, longtext, file, file_list, image, color_list, select (one of options[]), multiselect (several of options[]; min_count/max_count in constraints), boolean, url, secret (encrypted; revealed exactly once — store the value on the first read), structured (requires schema with JSON Schema).
+
+DECISIONS — questions for the developer, not the client. An item with assignee="owner" and type select/multiselect is a question only the account holder can settle ("does the discounted plan cost 19 or 29?"). Never stop and wait for one: give it a "proposed" answer and carry on building. proposed = { value: "19", rationale: "matches the competitor we benchmarked" } records what you went with and why; it is stored separately from the real answer, so it can never be mistaken for one the developer gave.
+
+Read the answer back from get_intake_results. meta.<key>.decided_by tells you which it is: "owner" means a person settled it, "agent_proposal" means the build is still standing on your own pick and may yet be overruled. You cannot confirm your own proposal — answering is the developer's, through the dashboard.
 Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they become property names in get_intake_results.`,
     inputSchema: {
       type: 'object' as const,
@@ -358,6 +392,7 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
                   'image',
                   'color_list',
                   'select',
+                  'multiselect',
                   'boolean',
                   'url',
                   'secret',
@@ -483,7 +518,9 @@ Secrets (type=secret, e.g. passwords, API keys) are decrypted and returned in pl
 
 Use only_new=true to get only items submitted since the last call (useful in webhook-driven workflows). Use include_pending=true to also return partially filled items.
 
-Returns { results: { <key>: <typed value> }, meta: { <key>: { type, status, submitted_at, first_reveal? } } }.`,
+Returns { results: { <key>: <typed value> }, meta: { <key>: { type, status, submitted_at, first_reveal? } } }.
+
+For a DECISION (assignee=owner, type select/multiselect) results holds the answer currently standing and meta.<key>.decided_by says whose it is: "owner" once a person has settled it, "agent_proposal" while it is still your own pick. A proposed decision is returned even without include_pending — you need back the assumption you are building on. It does not bump revision, so an only_new read surfaces exactly the decisions a person has since answered or changed.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -615,7 +652,7 @@ Items must follow the same key/type/label rules as define_intake (snake_case key
                 type: 'string',
                 enum: [
                   'text', 'longtext', 'file', 'file_list', 'image',
-                  'color_list', 'select', 'boolean', 'url', 'secret', 'structured',
+                  'color_list', 'select', 'multiselect', 'boolean', 'url', 'secret', 'structured',
                 ],
               },
               label: { type: 'string', description: 'Human-readable label shown to the client.' },
@@ -654,7 +691,7 @@ If the client has already answered and the change would make their answer invali
           type: 'string',
           enum: [
             'text', 'longtext', 'file', 'file_list', 'image',
-            'color_list', 'select', 'boolean', 'url', 'secret', 'structured',
+            'color_list', 'select', 'multiselect', 'boolean', 'url', 'secret', 'structured',
           ],
         },
         label: { type: 'string', description: 'Human-readable label shown to the client.' },
@@ -839,6 +876,11 @@ export async function callDefineIntake(
         intake_id: result.intake_id,
         portal_url: result.portal_url,
         status: result.status,
+        // Passed through rather than dropped: the tool description tells the
+        // caller to act on this, and picking fields by hand here is what made
+        // it invisible in 0.5.0 — the advice existed on the wire and never
+        // reached the agent it was written for.
+        ...(result.follow_up ? { follow_up: result.follow_up } : {}),
         ...(notices.length > 0 ? { notices } : {}),
       },
       null,
