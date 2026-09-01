@@ -48,11 +48,34 @@ jobs:
           echo "npm never showed $want" >&2
           exit 1
 
+      # Retried because the registry has gone down mid-release once already
+      # (dial tcp: i/o timeout on the OIDC exchange), and a release that lands
+      # on npm but not here leaves the two permanently out of step with nothing
+      # to notice it. A validation error still fails on the first try — the
+      # retry is for the network, not for bad input.
       - name: Log in with GitHub OIDC
-        run: ./mcp-publisher login github-oidc
+        run: |
+          for i in 1 2 3 4 5; do
+            ./mcp-publisher login github-oidc && exit 0
+            echo "login attempt $i failed; retrying in 30s"
+            sleep 30
+          done
+          echo "could not reach the registry to log in" >&2
+          exit 1
 
       # The registry validates server.json server-side and rejects the whole
       # submission on any single field. The first attempt failed on
       # description: it caps at 100 characters and ours was 130. Keep it short.
       - name: Publish
-        run: ./mcp-publisher publish
+        run: |
+          for i in 1 2 3; do
+            out=$(./mcp-publisher publish 2>&1) && { echo "$out"; exit 0; }
+            echo "$out"
+            case "$out" in
+              *"validation failed"*|*"already exists"*)
+                echo "not a transient failure — stopping" >&2; exit 1;;
+            esac
+            echo "publish attempt $i failed; retrying in 30s"
+            sleep 30
+          done
+          exit 1
