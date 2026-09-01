@@ -207,7 +207,7 @@ Register, list or remove a webhook endpoint so events are pushed to your service
 ```
 action: "create"                    // create | list | delete
 url: "https://your.service/hooks/briefgate"
-events: ["intake.completed"]
+events: ["intake.completed", "intake.overdue"]
 format: "raw"                       // raw | slack | discord
 ```
 
@@ -233,6 +233,8 @@ Nothing pushes to an MCP client on its own — MCP is request/response, so the s
 
 - **You run a service** → register a webhook with `manage_webhook` and act on `intake.completed`.
 - **You are an agent in a terminal** → set up a recurring check that calls `get_intake_status` every `every_hours` hours until `until`. A cron entry, a systemd timer, or your agent host's own scheduler all work.
+
+Events worth acting on: `intake.completed` (everything is in) and `intake.overdue` (the deadline passed with required items missing — the project is blocked and the client needs a human, not another reminder).
 
 The cadence tightens near the deadline (24h normally, 12h inside a week, 6h inside two days) and is not tied to the reminder schedule: a client can submit everything at 2am having never opened a reminder.
 

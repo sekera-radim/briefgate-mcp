@@ -13,7 +13,8 @@ export type BriefGateWebhookEventType =
   | 'intake.completed'
   | 'client.viewed'
   | 'chase.bounced'
-  | 'intake.stalled';
+  | 'intake.stalled'
+  | 'intake.overdue';
 
 interface BaseEvent {
   event: BriefGateWebhookEventType;
@@ -35,6 +36,14 @@ export interface IntakeCompletedEvent extends BaseEvent {
 export interface ClientViewedEvent extends BaseEvent {
   event: 'client.viewed';
   client_email: string;
+}
+
+/** The due date passed with required items still outstanding. */
+export interface IntakeOverdueEvent extends BaseEvent {
+  event: 'intake.overdue';
+  project_name: string;
+  due_date: string;
+  outstanding_items: number;
 }
 
 export interface ChaseBounced extends BaseEvent {

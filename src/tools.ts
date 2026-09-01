@@ -683,7 +683,7 @@ Use this ONLY if you control a service that can receive public HTTPS requests. A
 
 action="create" returns a "secret" exactly once. Store it somewhere durable outside this conversation: it is needed to verify the signature on every delivery (use verifyWebhookSignature from @briefgate/mcp/webhook) and it cannot be retrieved again. If it is ever exposed, there is no rotation in place — delete the endpoint and create a new one, which issues a fresh secret.
 
-Events: intake.completed (all required items in — the one to act on), item.submitted (a single item arrived), client.viewed (the client opened the portal), chase.bounced (a reminder failed to deliver), intake.stalled (fires only when the intake sets max_reminders; without it this event never arrives).`,
+Events: intake.completed (all required items in — the one to act on), item.submitted (a single item arrived), client.viewed (the client opened the portal), chase.bounced (a reminder failed to deliver), intake.overdue (the due date passed with required items outstanding — the one to act on when work is blocked), intake.stalled (fires only when the intake sets max_reminders; without it this event never arrives).`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -700,7 +700,14 @@ Events: intake.completed (all required items in — the one to act on), item.sub
           type: 'array',
           items: {
             type: 'string',
-            enum: ['item.submitted', 'intake.completed', 'client.viewed', 'chase.bounced', 'intake.stalled'],
+            enum: [
+              'item.submitted',
+              'intake.completed',
+              'client.viewed',
+              'chase.bounced',
+              'intake.stalled',
+              'intake.overdue',
+            ],
           },
           description:
             'Events to receive. Required for action="create". For "tell me when the client is done", this is ["intake.completed"].',
@@ -969,7 +976,16 @@ export async function callManageWebhook(
       action: z.enum(['create', 'list', 'delete']),
       url: z.string().min(1).optional(),
       events: z
-        .array(z.enum(['item.submitted', 'intake.completed', 'client.viewed', 'chase.bounced', 'intake.stalled']))
+        .array(
+          z.enum([
+            'item.submitted',
+            'intake.completed',
+            'client.viewed',
+            'chase.bounced',
+            'intake.stalled',
+            'intake.overdue',
+          ]),
+        )
         .min(1)
         .optional(),
       format: z.enum(['raw', 'slack', 'discord']).optional(),
