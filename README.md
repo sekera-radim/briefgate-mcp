@@ -182,7 +182,6 @@ Send a manual reminder outside the automatic schedule. Use when a deadline is ap
 
 ```
 intake_id: "in_8f3k"
-channel: "sms"   // "email" (default) | "sms"
 ```
 
 Returns `{ sent: true }`.
@@ -313,8 +312,9 @@ You are a web development agent. When you need client assets:
    call request_revision with a clear note for the client.
    If the client has the asset in another form, call update_item to change the type.
 
-5. If the client is unresponsive after 9 days, call send_chase with channel="sms"
-   (only if a phone number was collected).
+5. If the client is still unresponsive after 9 days, call send_chase for an
+   extra nudge outside the automatic schedule, or tell the developer the intake
+   is stuck and let them pick up the phone.
 ```
 
 ## Verifying webhooks
@@ -399,7 +399,7 @@ app.post(
 | `item.submitted` | Client submits an item | `item_key`, `item_status` |
 | `intake.completed` | All required items approved | — |
 | `client.viewed` | Client opens the portal | `client_email` |
-| `chase.bounced` | Reminder email/SMS bounced | `channel`, `reason` |
+| `chase.bounced` | A reminder bounced | `channel`, `reason`, `recipient`, `still_chasing` |
 | `intake.stalled` | 3 reminders sent, no response | `attempts` |
 
 ## Pricing

@@ -669,9 +669,8 @@ Returns { sent: true }.`,
         },
         channel: {
           type: 'string',
-          enum: ['email', 'sms'],
-          description:
-            'Delivery channel. Default: email. Use "sms" only if the client provided a phone number and has not responded to emails.',
+          enum: ['email'],
+          description: 'Delivery channel. Email is the only one offered.',
         },
       },
       required: ['intake_id'],
@@ -1073,7 +1072,10 @@ export async function callSendChase(
   const parsed = z
     .object({
       intake_id: z.string().min(1),
-      channel: z.enum(['email', 'sms']).optional(),
+      // The API still accepts "sms"; this client does not offer it. There is no
+      // way for a customer to buy the credits an SMS spends, so an agent that
+      // asked for one would get a 402 it could do nothing about.
+      channel: z.enum(['email']).optional(),
     })
     .safeParse(args);
   if (!parsed.success) return validationError(parsed.error.issues);
