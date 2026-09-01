@@ -17,6 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { type BriefGateConfig } from './client.js';
 import { TOOLS, executeTool } from './tools.js';
 import { configForRequest, isAllowedHost, isAllowedOrigin } from './http-auth.js';
+import { PayloadTooLargeError, readBody } from './http-body.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -26,10 +27,30 @@ const baseUrl =
 
 // Warn early if BRIEFGATE_BASE_URL looks unsafe — it controls where API calls
 // (including the Authorization header) are sent, so it must be an https URL in
-// production. http:// localhost/127.0.0.1 is allowed for local development.
+// production. http:// is allowed without a warning for hosts that never leave
+// a private network: localhost/127.0.0.1 (local development), a bare hostname
+// with no dot (a Docker/Compose service name like "api" — only resolvable
+// inside that network, e.g. BRIEFGATE_BASE_URL=http://api:8585), and the
+// conventional private-network suffixes *.internal / *.local.
 if (process.env['BRIEFGATE_BASE_URL']) {
-  const isLocalhostHttp = /^http:\/\/(?:localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/.test(baseUrl);
-  if (!baseUrl.startsWith('https://') && !isLocalhostHttp) {
+  const isHttps = baseUrl.startsWith('https://');
+  let isSafeHttp = false;
+  if (!isHttps) {
+    try {
+      const hostname = new URL(baseUrl).hostname;
+      isSafeHttp =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '::1' ||
+        !hostname.includes('.') ||
+        hostname.endsWith('.internal') ||
+        hostname.endsWith('.local');
+    } catch {
+      // Malformed URL — leave isSafeHttp false so the warning fires; the
+      // request itself will fail with a clearer error once it's attempted.
+    }
+  }
+  if (!isHttps && !isSafeHttp) {
     process.stderr.write(
       'Warning: BRIEFGATE_BASE_URL does not use https:// — API keys will be sent over an insecure connection.\n',
     );
@@ -187,7 +208,25 @@ if (useHttp) {
     // Stateless mode: one Server + one Transport per request.
     // This is correct because MCP tool calls are independent request/response
     // cycles — no shared streaming context is needed between calls.
-    const rawBody = await readBody(req);
+    let rawBody: string;
+    try {
+      rawBody = await readBody(req);
+    } catch (err) {
+      if (err instanceof PayloadTooLargeError) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Request body too large' }, id: null }),
+        );
+        // The body was abandoned mid-stream, so the socket may still be sitting
+        // on unread bytes the client is trying to push — close it outright
+        // rather than leaving it open for `end` to (never) fire.
+        req.socket.destroy();
+        return;
+      }
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }));
+      return;
+    }
     let parsedBody: unknown;
     try {
       parsedBody = rawBody ? JSON.parse(rawBody) : undefined;
@@ -240,15 +279,3 @@ if (useHttp) {
   await server.connect(transport);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer | string) =>
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
-    );
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}

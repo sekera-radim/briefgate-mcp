@@ -156,6 +156,91 @@ describe('itemDefinitionSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // assignee=owner is a private to-do for the account holder and never
+  // reaches the client portal, so upload/secret types make no sense on it —
+  // matches server/src/schemas.ts OWNER_FORBIDDEN_TYPES.
+  it('rejects assignee=owner with type=file/file_list/image/secret', () => {
+    for (const type of ['file', 'file_list', 'image', 'secret'] as const) {
+      const result = itemDefinitionSchema.safeParse({
+        key: 'contract',
+        type,
+        label: 'Signed contract',
+        assignee: 'owner',
+      });
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues.some((i) => /assignee=owner/.test(i.message))).toBe(true);
+    }
+  });
+
+  it('accepts assignee=owner with type=boolean (a plain tick-off task)', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'call_client',
+      type: 'boolean',
+      label: 'Call the client about scope',
+      assignee: 'owner',
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// ─── constraintsSchema: cross-field and bound validation ──────────────────────
+
+describe('constraintsSchema (via itemDefinitionSchema.constraints)', () => {
+  it('rejects max_bytes over 500 MiB', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'video',
+      type: 'file',
+      label: 'Promo video',
+      constraints: { max_bytes: 500 * 1024 * 1024 + 1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects min_chars/max_chars over 100000', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'bio',
+      type: 'longtext',
+      label: 'Bio',
+      constraints: { max_chars: 100001 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects min_count greater than max_count', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'photos',
+      type: 'file_list',
+      label: 'Photos',
+      constraints: { min_count: 10, max_count: 5 },
+    });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues.some((i) => /min_count must not exceed max_count/.test(i.message))).toBe(true);
+  });
+
+  it('rejects min_chars greater than max_chars', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'headline',
+      type: 'longtext',
+      label: 'Headline',
+      constraints: { min_chars: 400, max_chars: 100 },
+    });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues.some((i) => /min_chars must not exceed max_chars/.test(i.message))).toBe(true);
+  });
+
+  it('accepts constraints within bounds and ordered correctly', () => {
+    const result = itemDefinitionSchema.safeParse({
+      key: 'headline',
+      type: 'longtext',
+      label: 'Headline',
+      constraints: { min_chars: 10, max_chars: 400 },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 // ─── callDefineIntake: correct endpoint and body ──────────────────────────────
@@ -414,6 +499,65 @@ describe('callDefineIntake', () => {
     const key1 = (vi.mocked(fetch).mock.calls[0] as [string, RequestInit])[1].headers as Record<string, string>;
     const key2 = (vi.mocked(fetch).mock.calls[1] as [string, RequestInit])[1].headers as Record<string, string>;
     expect(key1['Idempotency-Key']).toBe(key2['Idempotency-Key']);
+  });
+});
+
+// ─── clientSchema: timezone and also_notify validation ────────────────────────
+
+describe('callDefineIntake — client validation', () => {
+  it('rejects a non-IANA timezone before calling the API', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková', timezone: 'CET' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/IANA timezone/i);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid IANA timezone', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockOk({ intake_id: 'in_tz', portal_url: 'https://p.briefgate.dev/tz', status: 'sent', items: [] }),
+    );
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková', timezone: 'Europe/Prague' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('rejects also_notify containing the same address as the primary client', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: {
+        email: 'client@example.com',
+        name: 'Jana Nováková',
+        also_notify: [{ email: 'Client@Example.com', name: 'Duplicate' }],
+      },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/already on the intake/i);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('rejects two also_notify entries with the same address', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: {
+        email: 'client@example.com',
+        name: 'Jana Nováková',
+        also_notify: [
+          { email: 'director@example.com', name: 'A' },
+          { email: 'director@example.com', name: 'B' },
+        ],
+      },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/already on the intake/i);
   });
 });
 

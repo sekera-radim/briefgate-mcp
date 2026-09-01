@@ -1,6 +1,6 @@
 {
   "name": "@briefgate/mcp",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "mcpName": "io.github.sekera-radim/briefgate",
   "description": "BriefGate MCP server — your coding agent asks the client for logos, copy and credentials, and BriefGate chases them until they arrive.",
   "keywords": [

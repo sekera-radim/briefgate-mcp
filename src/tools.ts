@@ -1,4 +1,4 @@
-// Tool definitions, Zod validation, and execute functions for all 7 BriefGate MCP tools.
+// Tool definitions, Zod validation, and execute functions for all 9 BriefGate MCP tools.
 // TOOLS is the JSON-schema array sent to the MCP client in ListTools.
 // executeTool dispatches CallTool requests to typed execute functions.
 
@@ -20,6 +20,16 @@ import {
 } from './client.js';
 
 // ─── Shared Zod schemas (exported for testing) ────────────────────────────────
+
+// Mirrors the server's own pattern (server/src/schemas.ts) so a bad timezone
+// is rejected here, in the same shape, instead of only surfacing as a 422
+// after the request has already gone out.
+const IANA_TZ = /^[A-Za-z]+(?:_[A-Za-z]+)*(?:\/[A-Za-z0-9+_-]+)+$/;
+
+// Types that put material in front of the client (an upload, a decrypted
+// secret) — an "owner" item is a private to-do for the account holder and
+// never reaches the client portal, so none of these make sense on one.
+const OWNER_FORBIDDEN_TYPES = new Set(['file', 'file_list', 'image', 'secret']);
 
 export const itemKeySchema = z
   .string()
@@ -52,14 +62,33 @@ const constraintsSchema = z
     min_height: z.number().int().positive().max(20000).optional(),
     max_width: z.number().int().positive().max(20000).optional(),
     max_height: z.number().int().positive().max(20000).optional(),
-    max_bytes: z.number().int().positive().optional(),
-    min_chars: z.number().int().nonnegative().optional(),
-    max_chars: z.number().int().positive().optional(),
+    // Bounds match the server (server/src/schemas.ts) — without them a value
+    // that could never be satisfied (e.g. max_chars over 100k) only failed at
+    // the API, after the intake had already been described to the caller.
+    max_bytes: z.number().int().positive().max(500 * 1024 * 1024).optional(),
+    min_chars: z.number().int().nonnegative().max(100000).optional(),
+    max_chars: z.number().int().positive().max(100000).optional(),
     min_count: z.number().int().nonnegative().max(200).optional(),
     max_count: z.number().int().positive().max(200).optional(),
     transparent_background: z.boolean().optional(),
   })
   .strict()
+  .superRefine((c, ctx) => {
+    if (c.min_count !== undefined && c.max_count !== undefined && c.min_count > c.max_count) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['min_count'],
+        message: 'min_count must not exceed max_count',
+      });
+    }
+    if (c.min_chars !== undefined && c.max_chars !== undefined && c.min_chars > c.max_chars) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['min_chars'],
+        message: 'min_chars must not exceed max_chars',
+      });
+    }
+  })
   .optional();
 
 // Every object below is strict, matching the API's own schemas. Zod strips
@@ -133,6 +162,13 @@ export const itemDefinitionSchema = z
         message: 'type=structured requires a JSON Schema object in `schema`',
       });
     }
+    if (item.assignee === 'owner' && OWNER_FORBIDDEN_TYPES.has(item.type)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['assignee'],
+        message: `assignee=owner cannot use type=${item.type}; owner items are ticked off, not uploaded to`,
+      });
+    }
   });
 
 const clientSchema = z
@@ -147,7 +183,7 @@ const clientSchema = z
       .min(1, "Client name is required — every email opens by addressing them.")
       .max(200),
     language: z.enum(['cs', 'sk', 'pl', 'de', 'es', 'en']).optional(),
-    timezone: z.string().optional(),
+    timezone: z.string().regex(IANA_TZ, 'Expected an IANA timezone like Europe/Prague').optional(),
     phone: z
       .string()
       .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
@@ -155,15 +191,34 @@ const clientSchema = z
     // Other people at the client who get the same link and the same reminders.
     also_notify: z
       .array(
-        z.object({
-          email: z.string().email().max(320),
-          name: z.string().trim().min(1).max(200).optional(),
-        }),
+        z
+          .object({
+            email: z.string().email().max(320),
+            name: z.string().trim().min(1).max(200).optional(),
+          })
+          .strict(),
       )
       .max(4)
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((client, ctx) => {
+    // Catches a duplicate against the primary client too, not just among
+    // also_notify entries — the server rejects it either way, and each extra
+    // address multiplies what one send_chase puts on somebody's doorstep.
+    const seen = new Set([client.email.trim().toLowerCase()]);
+    for (const [i, extra] of (client.also_notify ?? []).entries()) {
+      const key = extra.email.trim().toLowerCase();
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['also_notify', i, 'email'],
+          message: 'This address is already on the intake — one invitation each.',
+        });
+      }
+      seen.add(key);
+    }
+  });
 
 const brandingSchema = z
   .object({
