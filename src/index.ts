@@ -256,15 +256,17 @@ if (!cliSubcommand) {
           ...(result.isError ? { isError: true } : {}),
         };
       } catch (err) {
-        let message = err instanceof Error ? err.message : String(err);
-        // Non-published mode: point at the tool that fixes this, same as the
-        // missing-key message above. Published mode leaves the message as-is —
-        // opts.onToolError compares it verbatim against AUTH_FAILED_MESSAGE to
-        // decide whether to rewrite the HTTP status instead.
-        if (message === AUTH_FAILED_MESSAGE && !opts.isPublicHost) {
-          message = 'This key was revoked or expired. Call `login` again.';
+        const raw = err instanceof Error ? err.message : String(err);
+        // opts.onToolError compares the raw message against AUTH_FAILED_MESSAGE
+        // (published mode turns it into an HTTP 401), so it sees the original;
+        // the person sees advice that fits how they signed in.
+        opts.onToolError?.(raw);
+        let message = raw;
+        if (raw === AUTH_FAILED_MESSAGE) {
+          message = opts.isPublicHost
+            ? 'The access token was rejected: it has expired or was revoked. Your client needs to sign in to BriefGate again.'
+            : 'This key was revoked or expired. Call `login` again.';
         }
-        opts.onToolError?.(message);
         return {
           content: [{ type: 'text' as const, text: message }],
           isError: true,
