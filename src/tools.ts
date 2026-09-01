@@ -681,7 +681,7 @@ If the client has already answered and the change would make their answer invali
 
 Use this ONLY if you control a service that can receive public HTTPS requests. An agent running in a terminal cannot — for that case do not register anything and check on a schedule with get_intake_status instead. A registered endpoint that cannot receive produces failing deliveries and a false impression that the work is being watched.
 
-action="create" returns a "secret" exactly once. Store it: it is needed to verify the signature on every delivery (use verifyWebhookSignature from @briefgate/mcp/webhook) and it cannot be retrieved again.
+action="create" returns a "secret" exactly once. Store it somewhere durable outside this conversation: it is needed to verify the signature on every delivery (use verifyWebhookSignature from @briefgate/mcp/webhook) and it cannot be retrieved again. If it is ever exposed, there is no rotation in place — delete the endpoint and create a new one, which issues a fresh secret.
 
 Events: intake.completed (all required items in — the one to act on), item.submitted (a single item arrived), client.viewed (the client opened the portal), chase.bounced (a reminder failed to deliver), intake.stalled (fires only when the intake sets max_reminders; without it this event never arrives).`,
     inputSchema: {

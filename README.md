@@ -213,6 +213,8 @@ format: "raw"                       // raw | slack | discord
 
 `action: "create"` returns a `secret` **once** — store it, it verifies every delivery signature and cannot be retrieved again. Remove with `action: "delete"` and `webhook_id`.
 
+Because an agent receives the secret in a tool result, it can come to rest wherever that conversation is stored. There is no rotation endpoint: if a transcript leaks, delete the endpoint and create a new one to get a fresh secret.
+
 Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
 
 ## Knowing when the client is done
