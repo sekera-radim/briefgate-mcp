@@ -1,0 +1,55 @@
+# Publishes server.json to the official MCP Registry.
+#
+# Separate from publish.yml on purpose. That workflow publishes to npm and would
+# fail on a re-run once a version exists; this one is safe to dispatch by hand,
+# which is how an already-released version gets listed.
+#
+# Authentication is GitHub OIDC. The namespace in server.json is
+# io.github.sekera-radim/briefgate, and the registry accepts an io.github.<owner>
+# namespace from a workflow running in that owner's repository — so nothing is
+# stored here. The npm half of the check is satisfied by the "mcpName" field in
+# package.json, which must keep matching the name in server.json.
+name: Publish to MCP Registry
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+
+      # The registry checks that the npm package named in server.json exists and
+      # declares this server, so publishing here before npm has the version
+      # would fail. On a tag push both workflows start together; this retries
+      # rather than racing.
+      - name: Wait for the npm version to be visible
+        run: |
+          want=$(node -p "require('./package.json').version")
+          for i in $(seq 1 30); do
+            got=$(npm view @briefgate/mcp version 2>/dev/null || true)
+            [ "$got" = "$want" ] && echo "npm has $want" && exit 0
+            echo "npm has '$got', waiting for $want ($i/30)"
+            sleep 10
+          done
+          echo "npm never showed $want" >&2
+          exit 1
+
+      - name: Log in with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
