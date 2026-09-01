@@ -407,7 +407,7 @@ app.post(
 | Items per intake | 10 | unlimited | unlimited |
 | Storage | 1 GB | 25 GB | 100 GB |
 | Branding | "powered by" | custom logo + colors | + custom sending domain |
-| Chase | email, default | email, all schedules | + SMS credits |
+| Chase | email, default | email, all schedules | email, all schedules |
 | Secrets vault | — | yes | yes |
 | Webhooks + REST + MCP | yes | yes | yes |
 
