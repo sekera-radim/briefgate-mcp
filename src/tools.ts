@@ -229,10 +229,26 @@ const defineIntakeSchema = z
   .strict();
 
 // ─── MCP tool definitions (JSON schema, sent to the MCP client) ───────────────
+//
+// Every tool carries a title and annotations. A client uses readOnlyHint to
+// decide what it may call without asking, and destructiveHint to decide what it
+// must ask about first — so an annotation that flatters a tool is worse than
+// none at all. get_intake_results is the one worth reading twice: it sounds like
+// a read and is not one.
 
 export const TOOLS = [
   {
     name: 'define_intake',
+    title: 'Create client intake',
+    // Creates an intake and emails the client. Idempotent: the package derives a stable key from the arguments, so a retried call returns the original intake rather than sending a second invitation.
+    annotations: {
+      title: 'Create client intake',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Create a new client intake request — a branded portal where the client submits logos, copy, files, credentials, and other assets. BriefGate sends the invite email and chases the client automatically until all items are collected.
 
 Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status, follow_up }. Save intake_id — you need it for all follow-up calls.
@@ -491,6 +507,16 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
 
   {
     name: 'get_intake_status',
+    title: 'Check intake progress',
+    // Reads only.
+    annotations: {
+      title: 'Check intake progress',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Check the completion status of a client intake — which items are submitted, pending, or need revision; the history of automated chase emails sent; and when the client last opened the portal.
 
 Use this to decide whether to send a manual reminder (send_chase), request a revision (request_revision), or fetch results (get_intake_results). Returns per-item status and chase history.
@@ -510,6 +536,16 @@ This is also the call a scheduled check should make when no webhook is registere
 
   {
     name: 'get_intake_results',
+    title: 'Collect intake results',
+    // Not read-only, despite the name. A secret item is released exactly ONCE — this call burns it, and a later call returns the time of the reveal instead of the value. On an intake with retention.mode "on_delivery" it also starts the clock that deletes the contents about 24 hours later. Both are irreversible, so this is a destructive read.
+    annotations: {
+      title: 'Collect intake results',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Retrieve the typed submitted values from a client intake.
 
 Files are returned as signed URLs valid for 24 hours — download them promptly or store the URL for reuse within that window.
@@ -544,6 +580,16 @@ For a DECISION (assignee=owner, type select/multiselect) results holds the answe
 
   {
     name: 'request_revision',
+    title: 'Request a revision',
+    // Sends the client back to an item they had already submitted, and emails them about it.
+    annotations: {
+      title: 'Request a revision',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Ask the client to resubmit a specific item with a note explaining what is wrong.
 
 Use this after reviewing get_intake_results and finding an item that does not meet requirements — for example a blurry logo, copy that is too long, or a broken URL. The client is notified automatically and the item status moves to needs_revision.
@@ -572,6 +618,16 @@ Returns { status: "revision_requested", item_key }.`,
 
   {
     name: 'send_chase',
+    title: 'Send a reminder',
+    // Sends an email or SMS to the client. Nothing can unsend it, but it destroys no state.
+    annotations: {
+      title: 'Send a reminder',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Send a manual reminder to the client outside the automatic schedule.
 
 Use when a deadline is approaching and the client has not responded to automatic reminders, or when you want to send an SMS after email attempts have failed. The automatic chase schedule continues after this call — this is an extra nudge, not a replacement.
@@ -597,6 +653,16 @@ Returns { sent: true }.`,
 
   {
     name: 'list_intakes',
+    title: 'List intakes',
+    // Reads only.
+    annotations: {
+      title: 'List intakes',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `List all intakes in your account, optionally filtered by status or client email.
 
 Use this to get an overview of active projects, find a specific intake by the client's email when you have lost the intake_id, or check how many intakes are currently in progress.
@@ -629,6 +695,16 @@ Returns { intakes: [...], total } where each intake includes intake_id, project_
 
   {
     name: 'add_items',
+    title: 'Add items to an intake',
+    // Adds to an existing intake and notifies the client. Purely additive.
+    annotations: {
+      title: 'Add items to an intake',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Add new items to an already-sent intake — for example, when you realise mid-project that you also need a favicon, social media assets, or additional credentials.
 
 The client is notified about the new items. Existing items and their submitted values are not affected. Returns the updated intake object.
@@ -675,6 +751,16 @@ Items must follow the same key/type/label rules as define_intake (snake_case key
 
   {
     name: 'update_item',
+    title: 'Edit an item',
+    // Destructive because discard_submitted_value throws away an answer the client has already given.
+    annotations: {
+      title: 'Edit an item',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Change one item on an intake that is already with the client — its type, label, hint, whether it is required, and which file formats it accepts.
 
 Reach for this when the field turns out to be the wrong shape: you asked for an image and the client only has their logo as a PDF, or what you asked for as a line of text is really a file. Widening the accepted formats or switching the type unblocks them without adding a duplicate item and waiving the original.
@@ -714,6 +800,16 @@ If the client has already answered and the change would make their answer invali
 
   {
     name: 'manage_webhook',
+    title: 'Manage webhook endpoints',
+    // Destructive because action "delete" removes an endpoint, and its signing secret cannot be recovered.
+    annotations: {
+      title: 'Manage webhook endpoints',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
     description: `Register, list, or remove a webhook endpoint so BriefGate pushes intake events to your service instead of you polling for them.
 
 Use this ONLY if you control a service that can receive public HTTPS requests. An agent running in a terminal cannot — for that case do not register anything and check on a schedule with get_intake_status instead. A registered endpoint that cannot receive produces failing deliveries and a false impression that the work is being watched.

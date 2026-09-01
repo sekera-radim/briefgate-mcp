@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  TOOLS,
   itemDefinitionSchema,
   itemKeySchema,
   callDefineIntake,
@@ -848,5 +849,42 @@ describe('decision items', () => {
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/non-empty options/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A client uses readOnlyHint to decide what it may call without asking, and
+ * destructiveHint to decide what it must ask about first. An annotation that
+ * flatters a tool is therefore worse than no annotation at all, and the
+ * Connectors Directory rejects a server whose tools carry neither.
+ */
+describe('tool annotations', () => {
+  it('gives every tool a title and the applicable hints', () => {
+    for (const tool of TOOLS) {
+      expect(tool.title, `${tool.name} has no title`).toBeTruthy();
+      expect(tool.annotations?.title, `${tool.name} has no annotations.title`).toBeTruthy();
+      expect(typeof tool.annotations?.readOnlyHint, `${tool.name}`).toBe('boolean');
+      expect(typeof tool.annotations?.destructiveHint, `${tool.name}`).toBe('boolean');
+      // Every one of them reaches the BriefGate API over the network.
+      expect(tool.annotations?.openWorldHint, `${tool.name}`).toBe(true);
+    }
+  });
+
+  it('marks only the two genuine reads as read-only', () => {
+    const readOnly = TOOLS.filter(t => t.annotations?.readOnlyHint).map(t => t.name).sort();
+    expect(readOnly).toEqual(['get_intake_status', 'list_intakes']);
+  });
+
+  it('does not call get_intake_results a read', () => {
+    // It burns a one-time secret and can start the deletion clock on the
+    // client's contents. Both are irreversible; neither is a read.
+    const results = TOOLS.find(t => t.name === 'get_intake_results');
+    expect(results?.annotations?.readOnlyHint).toBe(false);
+    expect(results?.annotations?.destructiveHint).toBe(true);
+  });
+
+  it('warns before the three tools that can throw work away', () => {
+    const destructive = TOOLS.filter(t => t.annotations?.destructiveHint).map(t => t.name).sort();
+    expect(destructive).toEqual(['get_intake_results', 'manage_webhook', 'update_item']);
   });
 });

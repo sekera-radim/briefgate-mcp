@@ -394,6 +394,21 @@ Full pricing at `GET https://api.briefgate.dev/pricing.json` (no auth required �
 
 BriefGate is hosted in the EU: application servers at netcup GmbH in Nuremberg, Germany; files in Cloudflare R2 under EU jurisdiction. See the [GDPR notes](https://briefgate.dev/docs/gdpr) and the [DPA](https://briefgate.dev/docs/dpa).
 
+## Privacy Policy
+
+This package is a thin client: it holds no data of its own and sends nothing
+anywhere except to the BriefGate API at `api.briefgate.dev`, using the API key
+you configure. It writes no telemetry and no analytics.
+
+What BriefGate itself collects, how long it keeps it, who it is shared with and
+how to have it deleted is covered in full here:
+
+- **Privacy Policy** — https://briefgate.dev/docs/privacy
+- **Security** — https://briefgate.dev/docs/security
+- **Data Processing Agreement** — https://briefgate.dev/docs/dpa
+
+Contact for privacy requests: privacy@briefgate.dev
+
 ## Contributing
 
 This repository is the BriefGate MCP client only — a thin wrapper over the
