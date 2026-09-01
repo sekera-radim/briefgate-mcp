@@ -16,6 +16,7 @@ import {
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { type BriefGateConfig } from './client.js';
 import { TOOLS, executeTool } from './tools.js';
+import { configForRequest, isAllowedHost, isAllowedOrigin } from './http-auth.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,19 @@ const config: BriefGateConfig = {
   baseUrl,
 };
 
+// Set to the hostname this server is published under (e.g. mcp.briefgate.dev)
+// to run it as a public, multi-customer endpoint. Unset — the default and the
+// only thing `npx @briefgate/mcp --http` does on a laptop — keeps the server on
+// loopback with the operator's own key, exactly as before.
+//
+// Turning it on changes two things on purpose:
+//   * the listener binds 0.0.0.0 and the Host guard accepts this name, because
+//     a server behind a reverse proxy is reached by its public name;
+//   * the BRIEFGATE_API_KEY fallback is switched OFF. Leaving it on would let
+//     an anonymous caller spend the operator's key, which is the whole failure
+//     this mode has to avoid.
+const PUBLIC_HOST = process.env['BRIEFGATE_MCP_PUBLIC_HOST'];
+
 // The version handed to clients in the MCP handshake. Read from package.json
 // rather than repeated here: hand-maintained it had drifted to 0.1.0 while the
 // package shipped 0.3.0, so every client was told the wrong version.
@@ -63,9 +77,12 @@ const PACKAGE_VERSION: string = JSON.parse(
 
 // ─── Server factory ───────────────────────────────────────────────────────────
 
-// Returns a fresh Server instance bound to the shared config.
-// In HTTP mode we create one Server per request (stateless pattern).
-function buildServer(): Server {
+// Returns a fresh Server instance bound to one caller's config.
+//
+// HTTP mode builds one per request, which is what makes a public deployment
+// possible at all: the API key travels with the request rather than the
+// process, so two customers hitting the same server never share a credential.
+function buildServer(cfg: BriefGateConfig): Server {
   const server = new Server(
     { name: '@briefgate/mcp', version: PACKAGE_VERSION },
     { capabilities: { tools: {} } },
@@ -77,12 +94,14 @@ function buildServer(): Server {
     const { name, arguments: rawArgs } = request.params;
     const args = (rawArgs ?? {}) as Record<string, unknown>;
 
-    if (!apiKey) {
+    if (!cfg.apiKey) {
       return {
         content: [
           {
             type: 'text' as const,
-            text: 'Error: BRIEFGATE_API_KEY is not set. Get a key at https://briefgate.dev and add it to your MCP client config.',
+            text: PUBLIC_HOST
+              ? 'Error: no API key was sent. Connect with an Authorization: Bearer bg_live_... header; get a key at https://briefgate.dev.'
+              : 'Error: BRIEFGATE_API_KEY is not set. Get a key at https://briefgate.dev and add it to your MCP client config.',
           },
         ],
         isError: true,
@@ -90,7 +109,7 @@ function buildServer(): Server {
     }
 
     try {
-      const result = await executeTool(name, config, args);
+      const result = await executeTool(name, cfg, args);
       return {
         content: [{ type: 'text' as const, text: result.text }],
         ...(result.isError ? { isError: true } : {}),
@@ -124,29 +143,35 @@ if (useHttp) {
     ? portArg
     : parseInt(process.env['BRIEFGATE_MCP_PORT'] ?? '', 10) || 3000;
 
-  // Bind to loopback only — DNS rebinding attacks require the server to accept
-  // requests from any origin; binding to 127.0.0.1 prevents cross-origin access
-  // from a browser-based attacker even when the Host header is spoofed.
-  const host = '127.0.0.1';
+  // Loopback unless this server is deliberately published. On a laptop the
+  // loopback bind is what stops a browser-based attacker reaching the server at
+  // all; behind a reverse proxy it would stop the proxy too.
+  const host = PUBLIC_HOST ? '0.0.0.0' : '127.0.0.1';
 
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // DNS rebinding guard: reject requests whose Host header does not resolve
     // to a loopback address. A real browser attacker cannot spoof this header,
     // but a misconfigured proxy or custom client might send something unexpected.
     const host_ = req.headers['host'] ?? '';
-    if (!isSafeHost(host_)) {
+    if (!isAllowedHost(host_, PUBLIC_HOST)) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid Host header — only localhost connections are accepted' }));
+      res.end(JSON.stringify({
+        error: PUBLIC_HOST
+          ? 'Invalid Host header'
+          : 'Invalid Host header — only localhost connections are accepted',
+      }));
       return;
     }
 
     // CORS: allow claude.ai and localhost origins; reject everything else.
     const origin = req.headers['origin'];
     if (origin !== undefined) {
-      if (isSafeOrigin(origin)) {
+      if (isAllowedOrigin(origin, PUBLIC_HOST)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Methods', 'POST, GET, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+        // authorization is on the list because that is how a remote caller
+        // sends its key; without it a browser client cannot connect at all.
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, authorization');
       } else {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Origin not allowed' }));
@@ -173,7 +198,7 @@ if (useHttp) {
     }
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = buildServer();
+    const server = buildServer(configForRequest(req, { publicHost: PUBLIC_HOST, envApiKey: apiKey, baseUrl }));
 
     res.on('close', () => {
       transport.close();
@@ -208,7 +233,9 @@ if (useHttp) {
   });
 } else {
   // ── stdio transport (default) ──────────────────────────────────────────────
-  const server = buildServer();
+  // One process, one user, key from the environment — a local client has no
+  // other way to hand one over.
+  const server = buildServer(config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
@@ -224,15 +251,4 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
-}
-
-const SAFE_HOST_RE = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
-function isSafeHost(host: string): boolean {
-  return SAFE_HOST_RE.test(host);
-}
-
-// Allow requests from localhost origins and claude.ai (which proxies MCP).
-const SAFE_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$|^https:\/\/claude\.ai$/;
-function isSafeOrigin(origin: string): boolean {
-  return SAFE_ORIGIN_RE.test(origin);
 }

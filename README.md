@@ -79,6 +79,29 @@ BRIEFGATE_API_KEY=bg_live_... npx @briefgate/mcp --http --port 3000
 
 The server binds to `127.0.0.1` only and includes DNS-rebinding protection. Behind a reverse proxy, terminate TLS there and forward to the local port — do not expose the port directly.
 
+### Published mode (one endpoint, many customers)
+
+Set `BRIEFGATE_MCP_PUBLIC_HOST` to the hostname the server is published under and
+it becomes a multi-customer endpoint: each caller sends its own key as
+`Authorization: Bearer bg_live_...`, and the server speaks to the BriefGate API
+as that caller.
+
+```bash
+BRIEFGATE_MCP_PUBLIC_HOST=mcp.example.com npx @briefgate/mcp --http --port 3000
+```
+
+Three things change, on purpose:
+
+- the listener binds `0.0.0.0` and the Host guard accepts that name, because a
+  server behind a reverse proxy is reached by its public name;
+- **the `BRIEFGATE_API_KEY` fallback is switched off.** Leaving it on would let
+  an anonymous caller spend the operator's key;
+- requests still reach `initialize` and `tools/list` without a key, so a client
+  or registry can read the tool list before anyone has signed up. A tool call
+  without a key fails with a sentence saying what to send.
+
+The public instance is `https://mcp.briefgate.dev/mcp`.
+
 ## Tools
 
 ### `define_intake`
