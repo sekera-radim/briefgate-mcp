@@ -198,7 +198,7 @@ describe('published mode (BRIEFGATE_MCP_PUBLIC_HOST set)', () => {
       `Bearer error="invalid_token", resource_metadata="https://${publicHost}/.well-known/oauth-protected-resource"`,
     );
     const text = await res.text();
-    expect(text).toContain('Authentication failed');
+    expect(text).toContain('sign in to BriefGate again');
   });
 
   it('allows an arbitrary origin on /mcp itself, not just the well-known route', async () => {
