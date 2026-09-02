@@ -49,7 +49,8 @@
     "lint": "eslint src test",
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run test",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "version": "node scripts/sync-server-json.mjs && git add server.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
