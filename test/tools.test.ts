@@ -11,6 +11,8 @@ import {
   callListIntakes,
   callAddItems,
   callUpdateItem,
+  callUpdateIntake,
+  callManageRecipients,
   callManageWebhook,
   type ToolResult,
 } from '../src/tools.js';
@@ -747,6 +749,171 @@ describe('callUpdateItem', () => {
   });
 });
 
+// The situation: a sent intake needs its cadence, deadline, or client details
+// changed without deleting and recreating it (which would re-send the invite).
+describe('callUpdateIntake', () => {
+  it('PATCHes the intake with only the changed fields', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1', status: 'sent' }));
+
+    const result = await callUpdateIntake(config, {
+      intake_id: 'in_1',
+      due_date: '2026-12-01',
+      max_reminders: 'unlimited',
+    });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/intakes/in_1');
+    expect(url).not.toContain('/items');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ due_date: '2026-12-01', max_reminders: 'unlimited' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('accepts client name/phone/timezone changes', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1' }));
+
+    await callUpdateIntake(config, {
+      intake_id: 'in_1',
+      client: { name: 'Jana Nováková', phone: null, timezone: 'Europe/Prague' },
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      client: { name: 'Jana Nováková', phone: null, timezone: 'Europe/Prague' },
+    });
+  });
+
+  // The portal link and magic token are bound to the client's address — this
+  // tool must not be able to touch it, in either direction.
+  it('rejects a client.email field before it reaches the API', async () => {
+    const result = await callUpdateIntake(config, {
+      intake_id: 'in_1',
+      client: { email: 'new@example.com' },
+    });
+    expect(result.isError).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('refuses a call that changes nothing', async () => {
+    const result = await callUpdateIntake(config, { intake_id: 'in_1' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/at least one field/i);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('refuses a client object with no fields to change', async () => {
+    const result = await callUpdateIntake(config, { intake_id: 'in_1', client: {} });
+    expect(result.isError).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  // Error mapping itself (the wording of the 409) is exercised in
+  // client.test.ts, against updateIntake directly — this only checks the
+  // failure actually propagates as a rejection an MCP host will surface.
+  it('propagates an archived-intake error', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'intake_archived' }),
+      headers: new Headers(),
+    } as unknown as Response);
+
+    await expect(
+      callUpdateIntake(config, { intake_id: 'in_1', project_name: 'New name' }),
+    ).rejects.toThrow(/archived/i);
+  });
+});
+
+// The situation: a bounced address needs reinstating, or someone new needs
+// adding to (or removing from) who gets the invite and the reminders.
+describe('callManageRecipients', () => {
+  it('add: POSTs the address and name to the recipients endpoint', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ email: 'extra@example.com' }));
+
+    const result = await callManageRecipients(config, {
+      intake_id: 'in_1',
+      action: 'add',
+      email: 'extra@example.com',
+      name: 'Petr',
+    });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/intakes/in_1/recipients');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ email: 'extra@example.com', name: 'Petr' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('remove: DELETEs the address from the recipients endpoint', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ deleted: true }));
+
+    await callManageRecipients(config, { intake_id: 'in_1', action: 'remove', email: 'extra@example.com' });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/intakes/in_1/recipients/extra%40example.com');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('reinstate: POSTs to the reinstate endpoint', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockOk({ email: 'extra@example.com', bounced_at: null, still_chasing: true }),
+    );
+
+    const result = await callManageRecipients(config, {
+      intake_id: 'in_1',
+      action: 'reinstate',
+      email: 'extra@example.com',
+    });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/intakes/in_1/recipients/extra%40example.com/reinstate');
+    expect(init.method).toBe('POST');
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.text)).toEqual({ email: 'extra@example.com', bounced_at: null, still_chasing: true });
+  });
+
+  // The generic 404/409 text elsewhere talks about a missing intake_id or a
+  // duplicate idempotency key — neither applies to an address on an intake
+  // that exists, so this endpoint needs its own wording (asserted in
+  // client.test.ts against reinstateRecipient directly). Here we only check
+  // the failure propagates as a rejection through the tool layer.
+  it('reinstate: propagates a not-on-intake error (404)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'recipient_not_found' }),
+      headers: new Headers(),
+    } as unknown as Response);
+
+    await expect(
+      callManageRecipients(config, { intake_id: 'in_1', action: 'reinstate', email: 'ghost@example.com' }),
+    ).rejects.toThrow(/ghost@example\.com/);
+  });
+
+  it('reinstate: propagates a never-bounced error (409)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'recipient_not_bounced' }),
+      headers: new Headers(),
+    } as unknown as Response);
+
+    await expect(
+      callManageRecipients(config, { intake_id: 'in_1', action: 'reinstate', email: 'fine@example.com' }),
+    ).rejects.toThrow(/has not bounced/i);
+  });
+
+  it('rejects an unknown action', async () => {
+    const result = await callManageRecipients(config, {
+      intake_id: 'in_1',
+      action: 'archive',
+      email: 'extra@example.com',
+    });
+    expect(result.isError).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
+
 // ─── cadence notices: what a fast cadence quietly implies ─────────────────────
 
 describe('callDefineIntake — cadence notices', () => {
@@ -1030,6 +1197,12 @@ describe('tool annotations', () => {
 
   it('warns before the tools that can throw work away', () => {
     const destructive = TOOLS.filter(t => t.annotations?.destructiveHint).map(t => t.name).sort();
-    expect(destructive).toEqual(['get_intake_results', 'logout', 'manage_webhook', 'update_item']);
+    expect(destructive).toEqual([
+      'get_intake_results',
+      'logout',
+      'manage_recipients',
+      'manage_webhook',
+      'update_item',
+    ]);
   });
 });

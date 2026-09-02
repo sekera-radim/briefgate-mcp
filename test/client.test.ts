@@ -8,6 +8,10 @@ import {
   sendChase,
   requestRevision,
   addItems,
+  updateIntake,
+  addRecipient,
+  removeRecipient,
+  reinstateRecipient,
   type BriefGateConfig,
 } from '../src/client.js';
 
@@ -270,6 +274,95 @@ describe('addItems', () => {
     const body = JSON.parse(init.body as string) as { items: typeof items };
     expect(body.items).toHaveLength(1);
     expect(body.items[0].key).toBe('favicon');
+  });
+});
+
+describe('updateIntake', () => {
+  it('sends PATCH /v1/intakes/:id with the given changes', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(200, { intake_id: 'in_1', status: 'sent' }));
+
+    await updateIntake(config, 'in_1', { due_date: '2026-12-01', chase_schedule: 'gentle' });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/intakes/in_1');
+    expect(init.method).toBe('PATCH');
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({ due_date: '2026-12-01', chase_schedule: 'gentle' });
+  });
+
+  // The generic 409 wording ("an intake with this idempotency key already
+  // exists") is about intake creation and would be actively misleading here —
+  // this route's only 409 is an archived intake.
+  it('409 → archived-intake message, not the generic idempotency-key text', async () => {
+    vi.mocked(fetch).mockResolvedValue(mockResponse(409, { error: 'intake_archived' }));
+
+    await expect(updateIntake(config, 'in_1', { project_name: 'New name' })).rejects.toThrow(/archived/i);
+    await expect(updateIntake(config, 'in_1', { project_name: 'New name' })).rejects.not.toThrow(
+      /idempotency/i,
+    );
+  });
+});
+
+describe('recipients', () => {
+  it('addRecipient sends POST /v1/intakes/:id/recipients with email and name', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(200, { email: 'extra@example.com' }));
+
+    await addRecipient(config, 'in_1', { email: 'extra@example.com', name: 'Petr' });
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/intakes/in_1/recipients');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ email: 'extra@example.com', name: 'Petr' });
+  });
+
+  it('removeRecipient sends DELETE /v1/intakes/:id/recipients/:email, URL-encoded', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(204, {}));
+
+    await removeRecipient(config, 'in_1', 'extra+test@example.com');
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/intakes/in_1/recipients/extra%2Btest%40example.com');
+    expect(init.method).toBe('DELETE');
+  });
+
+  describe('reinstateRecipient', () => {
+    it('sends POST /v1/intakes/:id/recipients/:email/reinstate', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        mockResponse(200, { email: 'extra@example.com', bounced_at: null, still_chasing: true }),
+      );
+
+      const result = await reinstateRecipient(config, 'in_1', 'extra@example.com');
+
+      const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://api.briefgate.dev/v1/intakes/in_1/recipients/extra%40example.com/reinstate');
+      expect(init.method).toBe('POST');
+      expect(result).toEqual({ email: 'extra@example.com', bounced_at: null, still_chasing: true });
+    });
+
+    // Same reasoning as updateIntake's 409 above: the generic 404/409 text is
+    // written for the intake-level routes and would misdescribe an address
+    // problem as an intake problem.
+    it('404 → names the address, not "verify the intake_id"', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(404, { error: 'recipient_not_found' }));
+
+      await expect(reinstateRecipient(config, 'in_1', 'ghost@example.com')).rejects.toThrow(
+        /ghost@example\.com/,
+      );
+      await expect(reinstateRecipient(config, 'in_1', 'ghost@example.com')).rejects.not.toThrow(
+        /intake_id/i,
+      );
+    });
+
+    it('409 → "has not bounced", not the generic idempotency-key text', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(409, { error: 'recipient_not_bounced' }));
+
+      await expect(reinstateRecipient(config, 'in_1', 'fine@example.com')).rejects.toThrow(
+        /has not bounced/i,
+      );
+      await expect(reinstateRecipient(config, 'in_1', 'fine@example.com')).rejects.not.toThrow(
+        /idempotency/i,
+      );
+    });
   });
 });
 

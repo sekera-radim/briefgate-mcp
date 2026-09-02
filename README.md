@@ -53,7 +53,7 @@ Or add manually to `~/.claude/settings.json`:
 
 `BRIEFGATE_API_KEY` (or `--api-key` on the command line), if set, always takes precedence over a key `login` stored locally — running `login` while one is configured just says so instead of doing anything.
 
-**Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 11 tools.
+**Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 13 tools.
 
 ## Quickstart — Cursor / Codex / other MCP clients
 
@@ -312,6 +312,34 @@ discard_submitted_value: false      // true is required if the change invalidate
 ```
 
 Returns the updated item. If the client already submitted a value that the new definition would reject, the call fails with `item_answer_would_be_discarded` until you pass `discard_submitted_value: true`.
+
+### `update_intake`
+
+Change settings on an already-sent intake — project name, due date, reminder cadence, quiet hours, or the client's name, phone, language, and timezone. Use this instead of deleting and recreating the intake, which would re-send the invite.
+
+```
+intake_id: "in_8f3k"
+due_date: "2026-12-01"
+chase_schedule: "gentle"            // was "default"
+max_reminders: "unlimited"          // reactivates a stalled intake if it had hit its cap
+```
+
+If any chase-related field changes (`chase_schedule`, `chase_interval`, `chase_interval_unit`, `chase_at_time`, `max_reminders`, `respect_quiet_hours`, `due_date`, `client.timezone`) on a sent intake, every pending reminder is cancelled and re-planned from now — reminders already sent still count toward `max_reminders`.
+
+The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use `manage_recipients` for that. Fails if the intake is archived. Returns the full, updated intake object.
+
+### `manage_recipients`
+
+Add, remove, or reinstate a person who receives an intake's invite and reminders, alongside or instead of the primary client.
+
+```
+intake_id: "in_8f3k"
+action: "reinstate"                 // add | remove | reinstate
+email: "extra@example.com"
+name: "Petr"                        // only used with action="add"
+```
+
+`action="add"` invites another address the same way `also_notify` does at `define_intake` time. `action="remove"` stops future reminders to that address. `action="reinstate"` is for a bounce that was wrong — the person did get the e-mail — it clears the bounce flag so reminders resume, and re-plans the chase schedule from now if that address was the only one still being chased.
 
 ### `manage_webhook`
 

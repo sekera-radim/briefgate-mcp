@@ -1,4 +1,4 @@
-// Tool definitions, Zod validation, and execute functions for all 11 BriefGate MCP tools.
+// Tool definitions, Zod validation, and execute functions for all 13 BriefGate MCP tools.
 // TOOLS is the JSON-schema array sent to the MCP client in ListTools.
 // executeTool dispatches CallTool requests to typed execute functions.
 
@@ -13,6 +13,10 @@ import {
   getIntakeResults,
   addItems,
   updateItem,
+  updateIntake,
+  addRecipient,
+  removeRecipient,
+  reinstateRecipient,
   requestRevision,
   sendChase,
   listWebhooks,
@@ -252,6 +256,67 @@ const updateItemSchema = z
     v => Object.keys(v).some(k => !['intake_id', 'item_key', 'discard_submitted_value'].includes(k)),
     { message: 'Provide at least one field to change (type, label, help, required, constraints, options, pattern).' },
   );
+
+// Deliberately does not accept `email` — the portal link and magic token are
+// bound to the primary client's address, so changing it here would silently
+// break both. An address is added, removed, or reinstated instead, through
+// manage_recipients.
+const updateIntakeClientSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    phone: z
+      .string()
+      .regex(/^\+[1-9]\d{6,14}$/, 'Phone must be E.164 format, e.g. +420601123456')
+      .nullable()
+      .optional(),
+    language: z.enum(['cs', 'sk', 'pl', 'de', 'es', 'en']).optional(),
+    timezone: z.string().regex(IANA_TZ, 'Expected an IANA timezone like Europe/Prague').optional(),
+  })
+  .strict()
+  .refine(v => Object.keys(v).length > 0, {
+    message: 'client was given but has no fields to change (name, phone, language, timezone).',
+  });
+
+const updateIntakeSchema = z
+  .object({
+    intake_id: z.string().min(1),
+    owner_note: z.string().max(5000).nullable().optional(),
+    project_name: z.string().min(1).max(200).optional(),
+    due_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+      .nullable()
+      .optional(),
+    chase_schedule: z.enum(['default', 'gentle', 'aggressive', 'custom', 'off']).optional(),
+    chase_interval: z.number().int().min(1).optional(),
+    chase_interval_unit: z.enum(['minutes', 'hours', 'days']).optional(),
+    chase_at_time: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a 24-hour local time like "07:00"')
+      .nullable()
+      .optional(),
+    max_reminders: z.union([z.number().int().min(1).max(1000), z.literal('unlimited')]).optional(),
+    respect_quiet_hours: z.boolean().optional(),
+    client: updateIntakeClientSchema.optional(),
+  })
+  .strict()
+  .refine(
+    v => Object.keys(v).some(k => k !== 'intake_id'),
+    {
+      message:
+        'Provide at least one field to change (owner_note, project_name, due_date, chase_schedule, ' +
+        'chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, client).',
+    },
+  );
+
+const manageRecipientsSchema = z
+  .object({
+    intake_id: z.string().min(1),
+    action: z.enum(['add', 'remove', 'reinstate']),
+    email: z.string().email().max(320),
+    name: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
 
 const defineIntakeSchema = z
   .object({
@@ -882,6 +947,125 @@ If the client has already answered and the change would make their answer invali
   },
 
   {
+    name: 'update_intake',
+    title: 'Edit intake settings',
+    // Not destructive: nothing an agent already has (item answers, files) is
+    // discarded by any field here. Not idempotent: two identical calls each
+    // re-plan the chase schedule from their own "now", so the second call has
+    // an effect the first one didn't (the reminder times move again).
+    annotations: {
+      title: 'Edit intake settings',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
+    description: `Change settings on an intake that has already been sent — project name, due date, reminder cadence, quiet hours, or the client's name, phone, language, and timezone.
+
+Use this instead of deleting and recreating the intake when a deadline moves or the chase cadence needs to change. If any of chase_schedule, chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, due_date, or client.timezone is included, every pending reminder is cancelled and the schedule is re-planned from now — reminders already sent still count toward max_reminders. Raising max_reminders (or setting it to "unlimited") past the number already sent on a stalled intake reactivates it and resumes chasing.
+
+The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use manage_recipients to add, remove, or reinstate an address.
+
+Fails if the intake is archived. At least one field must be given. Returns the full, updated intake object.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string', description: 'Intake ID returned by define_intake.' },
+        owner_note: {
+          type: ['string', 'null'],
+          description: 'Private note, never shown to the client. null clears it.',
+        },
+        project_name: { type: 'string', description: 'Human-readable project name shown to the client.' },
+        due_date: {
+          type: ['string', 'null'],
+          description: 'Deadline in YYYY-MM-DD format. null clears it.',
+        },
+        chase_schedule: {
+          type: 'string',
+          enum: ['default', 'gentle', 'aggressive', 'custom', 'off'],
+          description:
+            'Automated reminder cadence. default=T+2d,T+5d,T+9d,weekly. gentle=T+3d,T+8d,biweekly. aggressive=T+1d,T+3d,T+5d,every-other-day. custom=every chase_interval chase_interval_unit. off=no auto reminders.',
+        },
+        chase_interval: {
+          type: 'number',
+          description: 'How often to remind, only meaningful with chase_schedule="custom". Pair with chase_interval_unit.',
+        },
+        chase_interval_unit: {
+          type: 'string',
+          enum: ['minutes', 'hours', 'days'],
+          description: 'Unit for chase_interval.',
+        },
+        chase_at_time: {
+          type: ['string', 'null'],
+          description:
+            'Anchor reminders to this 24-hour local time in the client\'s timezone (e.g. "07:00"), overriding quiet hours. null clears it.',
+        },
+        max_reminders: {
+          type: ['number', 'string'],
+          description:
+            'Cap on reminder attempts (1-1000), or "unlimited". Raising this above the number already sent reactivates a stalled intake.',
+        },
+        respect_quiet_hours: {
+          type: 'boolean',
+          description: "Whether reminders pause outside 08:00-19:00 in the client's timezone.",
+        },
+        client: {
+          type: 'object',
+          description: 'Client fields to change. Email cannot be changed here — use manage_recipients.',
+          properties: {
+            name: { type: 'string', description: 'Client name, used to address them in emails.' },
+            phone: {
+              type: ['string', 'null'],
+              description: 'E.164 phone number (e.g. +420601123456) for SMS reminders. null clears it.',
+            },
+            language: { type: 'string', enum: ['cs', 'sk', 'pl', 'de', 'es', 'en'] },
+            timezone: { type: 'string', description: 'IANA timezone, e.g. Europe/Prague.' },
+          },
+        },
+      },
+      required: ['intake_id'],
+    },
+  },
+
+  {
+    name: 'manage_recipients',
+    title: 'Manage intake recipients',
+    // Destructive because action="remove" stops an address from receiving
+    // anything further about the intake.
+    annotations: {
+      title: 'Manage intake recipients',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
+    description: `Add, remove, or reinstate a person who receives an intake's invite and reminders, alongside or instead of the primary client.
+
+action="add" invites another address the same way also_notify does at define_intake time — its own message, its own bounce state; pass name to address it by name. action="remove" stops future reminders to that address. action="reinstate" is for a bounce that was wrong — the person did get the e-mail — and clears the bounce flag so reminders resume; if that address was the only one still being chased, the schedule is re-planned from now.
+
+Fails if the address is not on the intake, or — for reinstate — if it never bounced in the first place.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string', description: 'Intake ID returned by define_intake.' },
+        action: {
+          type: 'string',
+          enum: ['add', 'remove', 'reinstate'],
+          description: 'What to do with the address.',
+        },
+        email: { type: 'string', description: "The recipient's e-mail address." },
+        name: {
+          type: 'string',
+          description: 'Their name, used to address their copy. Only used with action="add".',
+        },
+      },
+      required: ['intake_id', 'action', 'email'],
+    },
+  },
+
+  {
     name: 'manage_webhook',
     title: 'Manage webhook endpoints',
     // Destructive because action "delete" removes an endpoint, and its signing secret cannot be recovered.
@@ -1236,6 +1420,38 @@ export async function callUpdateItem(
   return { text: JSON.stringify(result, null, 2) };
 }
 
+export async function callUpdateIntake(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = updateIntakeSchema.safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const { intake_id, ...changes } = parsed.data;
+  const result = await updateIntake(config, intake_id, changes);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callManageRecipients(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = manageRecipientsSchema.safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+  const { intake_id, action, email, name } = parsed.data;
+
+  if (action === 'add') {
+    const result = await addRecipient(config, intake_id, { email, ...(name !== undefined && { name }) });
+    return { text: JSON.stringify(result, null, 2) };
+  }
+  if (action === 'remove') {
+    const result = await removeRecipient(config, intake_id, email);
+    return { text: JSON.stringify(result, null, 2) };
+  }
+  const result = await reinstateRecipient(config, intake_id, email);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function callManageWebhook(
@@ -1364,6 +1580,10 @@ export async function executeTool(
       return callAddItems(config, args);
     case 'update_item':
       return callUpdateItem(config, args);
+    case 'update_intake':
+      return callUpdateIntake(config, args);
+    case 'manage_recipients':
+      return callManageRecipients(config, args);
     case 'manage_webhook':
       return callManageWebhook(config, args);
     case 'login':

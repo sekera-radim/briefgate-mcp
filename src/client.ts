@@ -150,6 +150,11 @@ export async function apiRequest<T>(
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
+  // Per-call replacement text for a status code, used where the generic
+  // wording below (written for the intake-level routes: a missing intake, a
+  // duplicate idempotency key) would misdescribe what actually went wrong on
+  // a route with different 4xx semantics, e.g. reinstating a recipient.
+  statusOverrides?: Partial<Record<number, string>>,
 ): Promise<T> {
   const url = `${config.baseUrl}/v1${path}`;
   const controller = new AbortController();
@@ -186,7 +191,7 @@ export async function apiRequest<T>(
   }
 
   if (!res.ok) {
-    return throwApiError(res);
+    return throwApiError(res, statusOverrides);
   }
 
   if (res.status === 204) {
@@ -210,7 +215,15 @@ export async function apiRequest<T>(
 export const AUTH_FAILED_MESSAGE =
   'Authentication failed — verify your BRIEFGATE_API_KEY is correct and has not been revoked.';
 
-async function throwApiError(res: Response): Promise<never> {
+async function throwApiError(
+  res: Response,
+  statusOverrides?: Partial<Record<number, string>>,
+): Promise<never> {
+  const override = statusOverrides?.[res.status];
+  if (override !== undefined) {
+    throw new Error(override);
+  }
+
   let message = '';
   let retryAfter = '';
   try {
@@ -328,6 +341,68 @@ export async function updateItem(
   changes: Record<string, unknown>,
 ): Promise<{ item: Record<string, unknown>; discarded_submitted_value?: boolean }> {
   return apiRequest(config, 'PATCH', `/intakes/${intakeId}/items/${encodeURIComponent(itemKey)}`, changes);
+}
+
+export async function updateIntake(
+  config: BriefGateConfig,
+  intakeId: string,
+  changes: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return apiRequest(config, 'PATCH', `/intakes/${intakeId}`, changes, undefined, {
+    // The generic 409 text is written for intake creation (a duplicate
+    // idempotency key); this route's only 409 is an archived intake.
+    409: 'This intake is archived and its settings can no longer be changed.',
+  });
+}
+
+// ─── Recipients ───────────────────────────────────────────────────────────────
+//
+// The primary client and each also_notify address get their own bounce state.
+// These wrap the recipients sub-resource so an agent can manage that list
+// after the intake was sent, not just at define_intake time.
+
+export interface RecipientReinstated {
+  email: string;
+  bounced_at: null;
+  still_chasing: boolean;
+}
+
+export async function addRecipient(
+  config: BriefGateConfig,
+  intakeId: string,
+  payload: { email: string; name?: string },
+): Promise<Record<string, unknown>> {
+  return apiRequest(config, 'POST', `/intakes/${intakeId}/recipients`, payload);
+}
+
+export async function removeRecipient(
+  config: BriefGateConfig,
+  intakeId: string,
+  email: string,
+): Promise<Record<string, unknown>> {
+  return apiRequest(config, 'DELETE', `/intakes/${intakeId}/recipients/${encodeURIComponent(email)}`);
+}
+
+export async function reinstateRecipient(
+  config: BriefGateConfig,
+  intakeId: string,
+  email: string,
+): Promise<RecipientReinstated> {
+  return apiRequest<RecipientReinstated>(
+    config,
+    'POST',
+    `/intakes/${intakeId}/recipients/${encodeURIComponent(email)}/reinstate`,
+    undefined,
+    undefined,
+    {
+      // The generic 404/409 text is written for the intake-level routes
+      // (missing intake_id, duplicate idempotency key) and would mislead
+      // here — the intake exists either way; it's this one address that's
+      // wrong.
+      404: `No recipient "${email}" on this intake — check the address, e.g. with get_intake_status.`,
+      409: `"${email}" has not bounced — nothing to reinstate.`,
+    },
+  );
 }
 
 export async function requestRevision(
