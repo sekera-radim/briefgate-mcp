@@ -2,6 +2,10 @@
 
 **Stop your coding agent stalling on client logos, copy and credentials.**
 
+![BriefGate demo: an intake being defined, the client filling the portal, results coming back](https://briefgate.dev/assets/demo/briefgate-demo.gif)
+
+[Watch as MP4 (47 s)](https://briefgate.dev/assets/demo/briefgate-demo.mp4)
+
 BriefGate is the first client intake tool built for AI agents. Your agent declares what it needs (`define_intake`), BriefGate generates a branded portal and chases the client automatically with email reminders, and your agent retrieves fully typed assets (`get_intake_results`) and keeps building.
 
 ```
@@ -531,6 +535,8 @@ app.post(
 | `intake.stalled` | 3 reminders sent, no response | `attempts` |
 
 ## Pricing
+
+Launch offer: code `LAUNCH20` gives 20% off Solo and Agency for the lifetime of the subscription, valid until 4 October 2026 (new customers, plans only).
 
 | | Free | Solo — $29/mo | Agency — $79/mo |
 |---|---|---|---|
