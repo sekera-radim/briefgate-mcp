@@ -12,6 +12,8 @@ import {
   addRecipient,
   removeRecipient,
   reinstateRecipient,
+  listFolders,
+  createFolder,
   type BriefGateConfig,
 } from '../src/client.js';
 
@@ -229,6 +231,50 @@ describe('listIntakes', () => {
     expect(url).toContain('/v1/intakes');
     expect(url).toContain('status=in_progress');
     expect(url).toContain('limit=10');
+  });
+
+  it('sends folder_id and q as query params', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(200, { intakes: [], total: 0 }));
+
+    await listIntakes(config, { folder_id: 'none', q: 'kramolíšová' });
+
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('folder_id=none');
+    expect(url).toContain('q=');
+  });
+});
+
+describe('folders', () => {
+  it('listFolders sends GET /v1/folders', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(200, { folders: [] }));
+
+    await listFolders(config);
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toBe('https://api.briefgate.dev/v1/folders');
+    expect(init?.method ?? 'GET').toBe('GET');
+  });
+
+  it('createFolder sends POST /v1/folders with the name', async () => {
+    const folder = { id: 'fld_1', name: 'Acme Inc', sort_order: 0, intake_count: 0, created_at: '2026-09-04T00:00:00Z' };
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse(201, folder));
+
+    const result = await createFolder(config, 'Acme Inc');
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/folders');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'Acme Inc' });
+    expect(result.id).toBe('fld_1');
+  });
+
+  // The generic 409 wording ("an intake with this idempotency key already
+  // exists") is about intake creation and would be actively misleading here.
+  it('createFolder: 409 → folder_exists message naming the folder, not the generic idempotency-key text', async () => {
+    vi.mocked(fetch).mockResolvedValue(mockResponse(409, { error: 'folder_exists' }));
+
+    await expect(createFolder(config, 'Acme Inc')).rejects.toThrow(/Acme Inc.*already exists/i);
+    await expect(createFolder(config, 'Acme Inc')).rejects.not.toThrow(/idempotency/i);
   });
 });
 

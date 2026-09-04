@@ -1,4 +1,4 @@
-// Tool definitions, Zod validation, and execute functions for all 13 BriefGate MCP tools.
+// Tool definitions, Zod validation, and execute functions for all 15 BriefGate MCP tools.
 // TOOLS is the JSON-schema array sent to the MCP client in ListTools.
 // executeTool dispatches CallTool requests to typed execute functions.
 
@@ -22,6 +22,8 @@ import {
   listWebhooks,
   createWebhook,
   deleteWebhook,
+  listFolders,
+  createFolder,
 } from './client.js';
 import { login, logout } from './login.js';
 
@@ -298,6 +300,7 @@ const updateIntakeSchema = z
     max_reminders: z.union([z.number().int().min(1).max(1000), z.literal('unlimited')]).optional(),
     respect_quiet_hours: z.boolean().optional(),
     client: updateIntakeClientSchema.optional(),
+    folder_id: z.string().min(1).nullable().optional(),
   })
   .strict()
   .refine(
@@ -305,7 +308,8 @@ const updateIntakeSchema = z
     {
       message:
         'Provide at least one field to change (owner_note, project_name, due_date, chase_schedule, ' +
-        'chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, client).',
+        'chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, client, ' +
+        'folder_id).',
     },
   );
 
@@ -315,6 +319,12 @@ const manageRecipientsSchema = z
     action: z.enum(['add', 'remove', 'reinstate']),
     email: z.string().email().max(320),
     name: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+const createFolderSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
   })
   .strict();
 
@@ -357,6 +367,7 @@ const defineIntakeSchema = z
       .strict()
       .optional(),
       send: z.boolean().optional(),
+      folder_id: z.string().min(1).optional(),
   })
   .strict();
 
@@ -649,6 +660,13 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
           description:
             'Whether to send the invite email immediately. Default: true. Set to false to create a draft and call /v1/intakes/:id/send later.',
         },
+        folder_id: {
+          type: 'string',
+          description:
+            'Put this intake in an existing folder from list_folders instead of leaving it unfiled. ' +
+            'Folders group intakes by client or project — reuse one for a returning client rather than ' +
+            'creating a duplicate with create_folder.',
+        },
       },
       required: ['project_name', 'client', 'items'],
     },
@@ -811,11 +829,11 @@ Returns { sent: true }.`,
       // Every tool here reaches the BriefGate API over the network.
       openWorldHint: true,
     },
-    description: `List all intakes in your account, optionally filtered by status or client email.
+    description: `List all intakes in your account, optionally filtered by status, client email, folder, or a text search.
 
-Use this to get an overview of active projects, find a specific intake by the client's email when you have lost the intake_id, or check how many intakes are currently in progress.
+Use this to get an overview of active projects, find a specific intake by the client's email when you have lost the intake_id, check how many intakes are currently in progress, or see what's in a folder from list_folders.
 
-Returns { intakes: [...], total } where each intake includes intake_id, project_name, status, created_at, due_date, and portal_url.`,
+Returns { intakes: [...], total } where each intake includes intake_id, project_name, status, created_at, due_date, folder_id, and portal_url.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -827,6 +845,16 @@ Returns { intakes: [...], total } where each intake includes intake_id, project_
         client_email: {
           type: 'string',
           description: 'Filter by client email address.',
+        },
+        folder_id: {
+          type: 'string',
+          description:
+            'Filter by folder, using an id from list_folders. Pass the literal string "none" to see only ' +
+            'intakes that are not in any folder.',
+        },
+        q: {
+          type: 'string',
+          description: 'Free-text search: matches a substring of project name, client name, or client email.',
         },
         limit: {
           type: 'number',
@@ -961,11 +989,13 @@ If the client has already answered and the change would make their answer invali
       // Every tool here reaches the BriefGate API over the network.
       openWorldHint: true,
     },
-    description: `Change settings on an intake that has already been sent — project name, due date, reminder cadence, quiet hours, or the client's name, phone, language, and timezone.
+    description: `Change settings on an intake that has already been sent — project name, due date, reminder cadence, quiet hours, which folder it's in, or the client's name, phone, language, and timezone.
 
 Use this instead of deleting and recreating the intake when a deadline moves or the chase cadence needs to change. If any of chase_schedule, chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, due_date, or client.timezone is included, every pending reminder is cancelled and the schedule is re-planned from now — reminders already sent still count toward max_reminders. Raising max_reminders (or setting it to "unlimited") past the number already sent on a stalled intake reactivates it and resumes chasing.
 
 The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use manage_recipients to add, remove, or reinstate an address.
+
+folder_id moves the intake to a different folder (an id from list_folders); set it to null to remove the intake from any folder. It never touches the chase schedule.
 
 Fails if the intake is archived. At least one field must be given. Returns the full, updated intake object.`,
     inputSchema: {
@@ -1022,6 +1052,12 @@ Fails if the intake is archived. At least one field must be given. Returns the f
             language: { type: 'string', enum: ['cs', 'sk', 'pl', 'de', 'es', 'en'] },
             timezone: { type: 'string', description: 'IANA timezone, e.g. Europe/Prague.' },
           },
+        },
+        folder_id: {
+          type: ['string', 'null'],
+          description:
+            'Move this intake to a different folder, using an id from list_folders. null removes it from ' +
+            'any folder.',
         },
       },
       required: ['intake_id'],
@@ -1126,6 +1162,60 @@ Events: intake.completed (all required items in — the one to act on), item.sub
       required: ['action'],
     },
   },
+
+  {
+    name: 'list_folders',
+    title: 'List folders',
+    // Reads only.
+    annotations: {
+      title: 'List folders',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
+    description: `List the folders in your account, used to group intakes by client or project.
+
+Call this before create_folder or before setting folder_id on define_intake, update_intake, or list_intakes — reuse an existing folder for a returning client instead of creating a duplicate.
+
+Returns { folders: [{ id, name, sort_order, intake_count, created_at }] }.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+
+  {
+    name: 'create_folder',
+    title: 'Create a folder',
+    // Adds a folder; nothing existing is touched.
+    annotations: {
+      title: 'Create a folder',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      // Every tool here reaches the BriefGate API over the network.
+      openWorldHint: true,
+    },
+    description: `Create a new folder to group intakes, e.g. one per client.
+
+Call list_folders first and reuse a matching folder — only create one when none of the existing folders fits. Fails with folder_exists if a folder with this name already exists; use list_folders to find it instead.
+
+Returns the created folder { id, name, sort_order, intake_count, created_at }.`,
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Folder name, e.g. the client\'s or project\'s name. Must be unique in your account.',
+        },
+      },
+      required: ['name'],
+    },
+  },
+
   {
     name: 'login',
     title: 'Sign in to BriefGate',
@@ -1382,6 +1472,8 @@ export async function callListIntakes(
         .enum(['draft', 'sent', 'in_progress', 'completed', 'archived'])
         .optional(),
       client_email: z.string().email().optional(),
+      folder_id: z.union([z.string().min(1), z.literal('none')]).optional(),
+      q: z.string().trim().min(1).max(200).optional(),
       limit: z.number().int().min(1).max(100).optional(),
       offset: z.number().int().min(0).optional(),
     })
@@ -1513,6 +1605,27 @@ export async function callManageWebhook(
   return { text: JSON.stringify(await listWebhooks(config), null, 2) };
 }
 
+// ─── folders ────────────────────────────────────────────────────────────────
+
+export async function callListFolders(
+  config: BriefGateConfig,
+  _args: unknown,
+): Promise<ToolResult> {
+  const result = await listFolders(config);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
+export async function callCreateFolder(
+  config: BriefGateConfig,
+  args: unknown,
+): Promise<ToolResult> {
+  const parsed = createFolderSchema.safeParse(args);
+  if (!parsed.success) return validationError(parsed.error.issues);
+
+  const result = await createFolder(config, parsed.data.name);
+  return { text: JSON.stringify(result, null, 2) };
+}
+
 // ─── login / logout ────────────────────────────────────────────────────────
 //
 // Unlike every other tool here, these never send the account's own API key
@@ -1586,6 +1699,10 @@ export async function executeTool(
       return callManageRecipients(config, args);
     case 'manage_webhook':
       return callManageWebhook(config, args);
+    case 'list_folders':
+      return callListFolders(config, args);
+    case 'create_folder':
+      return callCreateFolder(config, args);
     case 'login':
       return callLogin(config, context);
     case 'logout':

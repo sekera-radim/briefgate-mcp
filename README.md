@@ -57,7 +57,7 @@ Or add manually to `~/.claude/settings.json`:
 
 `BRIEFGATE_API_KEY` (or `--api-key` on the command line), if set, always takes precedence over a key `login` stored locally — running `login` while one is configured just says so instead of doing anything.
 
-**Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 13 tools.
+**Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 15 tools.
 
 ## Quickstart — Cursor / Codex / other MCP clients
 
@@ -228,6 +228,9 @@ items:
   - { key: "website_url", type: "url", label: "Current website URL", required: false }
   - { key: "service_tier", type: "select", label: "Service package",
       options: [{ value: "basic", label: "Basic" }, { value: "pro", label: "Pro" }] }
+// folder_id: "fld_1"
+//   Put the intake straight into an existing folder from list_folders instead
+//   of leaving it unfiled.
 ```
 
 **Item key rules:** must be `snake_case` (e.g. `logo`, `hero_copy`, `ga4_id`). Keys become property names in `get_intake_results` — no uppercase, no spaces, no hyphens.
@@ -280,11 +283,13 @@ Returns `{ sent: true }`.
 
 ### `list_intakes`
 
-List all intakes across projects, optionally filtered by status or client email.
+List all intakes across projects, optionally filtered by status, client email, folder, or a text search.
 
 ```
 status: "in_progress"   // draft | sent | in_progress | completed | archived
 client_email: "john@example.com"
+folder_id: "fld_1"      // or "none" for intakes not in any folder
+q: "Finance"             // substring match on project name, client name, or client email
 limit: 20
 offset: 0
 ```
@@ -326,9 +331,10 @@ intake_id: "in_8f3k"
 due_date: "2026-12-01"
 chase_schedule: "gentle"            // was "default"
 max_reminders: "unlimited"          // reactivates a stalled intake if it had hit its cap
+// folder_id: "fld_1"                // move it into a folder; null removes it from any folder
 ```
 
-If any chase-related field changes (`chase_schedule`, `chase_interval`, `chase_interval_unit`, `chase_at_time`, `max_reminders`, `respect_quiet_hours`, `due_date`, `client.timezone`) on a sent intake, every pending reminder is cancelled and re-planned from now — reminders already sent still count toward `max_reminders`.
+If any chase-related field changes (`chase_schedule`, `chase_interval`, `chase_interval_unit`, `chase_at_time`, `max_reminders`, `respect_quiet_hours`, `due_date`, `client.timezone`) on a sent intake, every pending reminder is cancelled and re-planned from now — reminders already sent still count toward `max_reminders`. `folder_id` never touches the chase schedule.
 
 The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use `manage_recipients` for that. Fails if the intake is archived. Returns the full, updated intake object.
 
@@ -361,6 +367,24 @@ format: "raw"                       // raw | slack | discord
 Because an agent receives the secret in a tool result, it can come to rest wherever that conversation is stored. There is no rotation endpoint: if a transcript leaks, delete the endpoint and create a new one to get a fresh secret.
 
 Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
+
+### `list_folders`
+
+List the folders in your account, used to group intakes by client or project. Takes no arguments.
+
+Call this before `create_folder` or before setting `folder_id` on `define_intake`, `update_intake`, or `list_intakes` — reuse an existing folder for a returning client instead of creating a duplicate.
+
+Returns `{ folders: [{ id, name, sort_order, intake_count, created_at }] }`.
+
+### `create_folder`
+
+Create a new folder to group intakes, e.g. one per client.
+
+```
+name: "Acme Inc"
+```
+
+Call `list_folders` first and reuse a matching folder — only create one when none of the existing folders fits. Fails with `folder_exists` if a folder with this name already exists. Returns the created folder.
 
 ### `login`
 

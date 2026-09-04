@@ -14,6 +14,8 @@ import {
   callUpdateIntake,
   callManageRecipients,
   callManageWebhook,
+  callListFolders,
+  callCreateFolder,
   type ToolResult,
 } from '../src/tools.js';
 import type { BriefGateConfig } from '../src/client.js';
@@ -275,6 +277,23 @@ describe('callDefineIntake', () => {
     const result = await callDefineIntake(config, { project_name: 'Test' });
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/Validation error/);
+  });
+
+  it('passes folder_id through to the request body', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockOk({ intake_id: 'in_1', portal_url: 'https://p.briefgate.dev/1', status: 'sent', items: [] }),
+    );
+
+    await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+      folder_id: 'fld_1',
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body['folder_id']).toBe('fld_1');
   });
 
   // Zod strips unknown keys by default, so a mistyped parameter used to vanish
@@ -656,6 +675,24 @@ describe('callListIntakes', () => {
     const result = await callListIntakes(config, {});
     expect(result.isError).toBeFalsy();
   });
+
+  it('passes folder_id through, including the literal "none"', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intakes: [], total: 0 }));
+
+    await callListIntakes(config, { folder_id: 'none' });
+
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string];
+    expect(url).toContain('folder_id=none');
+  });
+
+  it('passes q through as a free-text search', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intakes: [], total: 0 }));
+
+    await callListIntakes(config, { q: 'Finance' });
+
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string];
+    expect(url).toContain('q=Finance');
+  });
 });
 
 // ─── callAddItems ─────────────────────────────────────────────────────────────
@@ -799,6 +836,24 @@ describe('callUpdateIntake', () => {
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/at least one field/i);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it('moves the intake to a folder', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1' }));
+
+    await callUpdateIntake(config, { intake_id: 'in_1', folder_id: 'fld_1' });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ folder_id: 'fld_1' });
+  });
+
+  it('clears the folder with folder_id: null', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1' }));
+
+    await callUpdateIntake(config, { intake_id: 'in_1', folder_id: null });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ folder_id: null });
   });
 
   it('refuses a client object with no fields to change', async () => {
@@ -1079,6 +1134,65 @@ describe('callManageWebhook', () => {
   });
 });
 
+// ─── folders ──────────────────────────────────────────────────────────────────
+//
+// Folders group intakes by client or project. list_folders is a plain read;
+// create_folder is the only write, and its one failure mode (a duplicate name)
+// needs to name the folder rather than repeat the generic idempotency-key text.
+
+describe('callListFolders', () => {
+  it('calls GET /v1/folders and returns the list', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockOk({ folders: [{ id: 'fld_1', name: 'Acme Inc', sort_order: 0, intake_count: 3, created_at: '2026-09-04T00:00:00Z' }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callListFolders(config, {});
+
+    expect(res.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
+    expect(url).toBe('https://api.briefgate.dev/v1/folders');
+    expect(init?.method ?? 'GET').toBe('GET');
+    const parsed = JSON.parse(res.text) as { folders: unknown[] };
+    expect(parsed.folders).toHaveLength(1);
+  });
+});
+
+describe('callCreateFolder', () => {
+  it('calls POST /v1/folders with the name', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockOk({ id: 'fld_1', name: 'Acme Inc', sort_order: 0, intake_count: 0, created_at: '2026-09-04T00:00:00Z' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callCreateFolder(config, { name: 'Acme Inc' });
+
+    expect(res.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.briefgate.dev/v1/folders');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'Acme Inc' });
+  });
+
+  it('rejects an empty name before it reaches the API', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callCreateFolder(config, { name: '  ' });
+    expect(res.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown parameter', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callCreateFolder(config, { name: 'Acme Inc', color: 'blue' });
+    expect(res.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 // ─── decisions ────────────────────────────────────────────────────────────────
 //
 // An agent must be able to pose a question it cannot answer and keep working.
@@ -1182,9 +1296,9 @@ describe('tool annotations', () => {
     }
   });
 
-  it('marks only the two genuine reads as read-only', () => {
+  it('marks only the genuine reads as read-only', () => {
     const readOnly = TOOLS.filter(t => t.annotations?.readOnlyHint).map(t => t.name).sort();
-    expect(readOnly).toEqual(['get_intake_status', 'list_intakes']);
+    expect(readOnly).toEqual(['get_intake_status', 'list_folders', 'list_intakes']);
   });
 
   it('does not call get_intake_results a read', () => {

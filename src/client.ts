@@ -81,6 +81,7 @@ export interface IntakeCreated {
   status: IntakeStatus;
   items: Array<{ key: string; status: ItemStatus }>;
   follow_up?: FollowUpAdvice;
+  folder_id?: string | null;
 }
 
 export interface IntakeStatusResult {
@@ -125,11 +126,24 @@ export interface IntakeListItem {
   created_at: string;
   due_date?: string;
   portal_url: string;
+  folder_id?: string | null;
 }
 
 export interface IntakeList {
   intakes: IntakeListItem[];
   total: number;
+}
+
+export interface FolderSummary {
+  id: string;
+  name: string;
+  sort_order: number;
+  intake_count: number;
+  created_at: string;
+}
+
+export interface FolderList {
+  folders: FolderSummary[];
 }
 
 export interface UsageResult {
@@ -296,11 +310,20 @@ export async function createIntake(
 
 export async function listIntakes(
   config: BriefGateConfig,
-  params: { status?: string; client_email?: string; limit?: number; offset?: number },
+  params: {
+    status?: string;
+    client_email?: string;
+    folder_id?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  },
 ): Promise<IntakeList> {
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.client_email) qs.set('client_email', params.client_email);
+  if (params.folder_id) qs.set('folder_id', params.folder_id);
+  if (params.q) qs.set('q', params.q);
   if (params.limit !== undefined) qs.set('limit', String(params.limit));
   if (params.offset !== undefined) qs.set('offset', String(params.offset));
   const query = qs.toString() ? `?${qs.toString()}` : '';
@@ -467,4 +490,25 @@ export async function deleteWebhook(
 
 export async function getUsage(config: BriefGateConfig): Promise<UsageResult> {
   return apiRequest<UsageResult>(config, 'GET', '/usage');
+}
+
+// ─── Folders ──────────────────────────────────────────────────────────────────
+//
+// Folders group intakes by client or project. An intake's folder_id is set at
+// creation (createIntake) or moved later (updateIntake) — there is no
+// dedicated "move" endpoint, so those two functions carry it, not this section.
+
+export async function listFolders(config: BriefGateConfig): Promise<FolderList> {
+  return apiRequest<FolderList>(config, 'GET', '/folders');
+}
+
+export async function createFolder(
+  config: BriefGateConfig,
+  name: string,
+): Promise<FolderSummary> {
+  return apiRequest<FolderSummary>(config, 'POST', '/folders', { name }, undefined, {
+    // The generic 409 text is written for intake creation (a duplicate
+    // idempotency key) and would misdescribe this route's only 409.
+    409: `A folder named "${name}" already exists — use list_folders to find it.`,
+  });
 }
