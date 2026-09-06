@@ -102,6 +102,8 @@ export interface IntakeStatusResult {
   }>;
   client_last_seen?: string;
   due_date?: string;
+  /** The brief shown to the client above the requested items, if one is set. */
+  client_brief?: string;
 }
 
 export interface IntakeResults {

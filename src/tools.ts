@@ -301,6 +301,7 @@ const updateIntakeSchema = z
     respect_quiet_hours: z.boolean().optional(),
     client: updateIntakeClientSchema.optional(),
     folder_id: z.string().min(1).nullable().optional(),
+    client_brief: z.string().max(5000).nullable().optional(),
   })
   .strict()
   .refine(
@@ -309,7 +310,7 @@ const updateIntakeSchema = z
       message:
         'Provide at least one field to change (owner_note, project_name, due_date, chase_schedule, ' +
         'chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, client, ' +
-        'folder_id).',
+        'folder_id, client_brief).',
     },
   );
 
@@ -356,6 +357,7 @@ const defineIntakeSchema = z
       .strict()
       .optional(),
     items: z.array(itemDefinitionSchema).min(1).max(100),
+    client_brief: z.string().max(5000).optional(),
     template: z.string().max(100).optional(),
     auto_approve_hours: z.number().int().min(0).max(720).optional(),
     retention: z
@@ -616,6 +618,15 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
           },
           minItems: 1,
           maxItems: 100,
+        },
+        client_brief: {
+          type: 'string',
+          maxLength: 5000,
+          description:
+            'Free-text brief shown to the client at the top of the portal, above the requested items — ' +
+            'information from you to them: an offer, instructions, or context for why you are asking for ' +
+            'these items. Up to 5000 characters. Documents attached to the brief go through the REST endpoint ' +
+            'POST /v1/intakes/:id/brief/files (dashboard or REST — not available through this MCP tool set).',
         },
         template: {
           type: 'string',
@@ -989,13 +1000,15 @@ If the client has already answered and the change would make their answer invali
       // Every tool here reaches the BriefGate API over the network.
       openWorldHint: true,
     },
-    description: `Change settings on an intake that has already been sent — project name, due date, reminder cadence, quiet hours, which folder it's in, or the client's name, phone, language, and timezone.
+    description: `Change settings on an intake that has already been sent — project name, due date, reminder cadence, quiet hours, which folder it's in, the client brief, or the client's name, phone, language, and timezone.
 
 Use this instead of deleting and recreating the intake when a deadline moves or the chase cadence needs to change. If any of chase_schedule, chase_interval, chase_interval_unit, chase_at_time, max_reminders, respect_quiet_hours, due_date, or client.timezone is included, every pending reminder is cancelled and the schedule is re-planned from now — reminders already sent still count toward max_reminders. Raising max_reminders (or setting it to "unlimited") past the number already sent on a stalled intake reactivates it and resumes chasing.
 
 The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use manage_recipients to add, remove, or reinstate an address.
 
 folder_id moves the intake to a different folder (an id from list_folders); set it to null to remove the intake from any folder. It never touches the chase schedule.
+
+client_brief replaces the free-text brief shown to the client above the requested items; set it to null to clear it. Documents attached to the brief are managed via the dashboard or the REST endpoint POST /v1/intakes/:id/brief/files, not through this tool.
 
 Fails if the intake is archived. At least one field must be given. Returns the full, updated intake object.`,
     inputSchema: {
@@ -1058,6 +1071,15 @@ Fails if the intake is archived. At least one field must be given. Returns the f
           description:
             'Move this intake to a different folder, using an id from list_folders. null removes it from ' +
             'any folder.',
+        },
+        client_brief: {
+          type: ['string', 'null'],
+          maxLength: 5000,
+          description:
+            'Free-text brief shown to the client at the top of the portal, above the requested items — ' +
+            'information from you to them: an offer, instructions, or context. Up to 5000 characters. ' +
+            'null clears it. Documents attached to the brief go through the REST endpoint ' +
+            'POST /v1/intakes/:id/brief/files (dashboard or REST — not available through this MCP tool set).',
         },
       },
       required: ['intake_id'],

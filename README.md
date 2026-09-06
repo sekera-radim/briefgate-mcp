@@ -231,6 +231,11 @@ items:
 // folder_id: "fld_1"
 //   Put the intake straight into an existing folder from list_folders instead
 //   of leaving it unfiled.
+// client_brief: "Here's the offer we agreed on, plus a few notes on scope..."
+//   Free text shown to the client above the requested items — information from
+//   you to them, not another thing you're asking them for. Up to 5000 characters.
+//   Documents go through POST /v1/intakes/:id/brief/files (dashboard or REST,
+//   not through MCP).
 ```
 
 **Item key rules:** must be `snake_case` (e.g. `logo`, `hero_copy`, `ga4_id`). Keys become property names in `get_intake_results` — no uppercase, no spaces, no hyphens.
@@ -324,7 +329,7 @@ Returns the updated item. If the client already submitted a value that the new d
 
 ### `update_intake`
 
-Change settings on an already-sent intake — project name, due date, reminder cadence, quiet hours, or the client's name, phone, language, and timezone. Use this instead of deleting and recreating the intake, which would re-send the invite.
+Change settings on an already-sent intake — project name, due date, reminder cadence, quiet hours, the client brief, or the client's name, phone, language, and timezone. Use this instead of deleting and recreating the intake, which would re-send the invite.
 
 ```
 intake_id: "in_8f3k"
@@ -332,6 +337,7 @@ due_date: "2026-12-01"
 chase_schedule: "gentle"            // was "default"
 max_reminders: "unlimited"          // reactivates a stalled intake if it had hit its cap
 // folder_id: "fld_1"                // move it into a folder; null removes it from any folder
+// client_brief: "Updated offer..."  // replaces the brief shown above the items; null clears it
 ```
 
 If any chase-related field changes (`chase_schedule`, `chase_interval`, `chase_interval_unit`, `chase_at_time`, `max_reminders`, `respect_quiet_hours`, `due_date`, `client.timezone`) on a sent intake, every pending reminder is cancelled and re-planned from now — reminders already sent still count toward `max_reminders`. `folder_id` never touches the chase schedule.

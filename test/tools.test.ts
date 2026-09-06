@@ -296,6 +296,34 @@ describe('callDefineIntake', () => {
     expect(body['folder_id']).toBe('fld_1');
   });
 
+  it('passes client_brief through to the request body', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockOk({ intake_id: 'in_1', portal_url: 'https://p.briefgate.dev/1', status: 'sent', items: [] }),
+    );
+
+    await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+      client_brief: "Here's the offer we agreed on.",
+    });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body['client_brief']).toBe("Here's the offer we agreed on.");
+  });
+
+  it('rejects a client_brief longer than 5000 characters', async () => {
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+      client_brief: 'a'.repeat(5001),
+    });
+    expect(result.isError).toBe(true);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
   // Zod strips unknown keys by default, so a mistyped parameter used to vanish
   // silently: `send_now` (the field is `send`) was dropped and the invite went
   // out anyway. The API answers 422 for the same body — failing here reports it
@@ -845,6 +873,24 @@ describe('callUpdateIntake', () => {
 
     const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toEqual({ folder_id: 'fld_1' });
+  });
+
+  it('replaces the client_brief', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1' }));
+
+    await callUpdateIntake(config, { intake_id: 'in_1', client_brief: 'Updated offer details.' });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ client_brief: 'Updated offer details.' });
+  });
+
+  it('clears the client_brief with client_brief: null', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1' }));
+
+    await callUpdateIntake(config, { intake_id: 'in_1', client_brief: null });
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ client_brief: null });
   });
 
   it('clears the folder with folder_id: null', async () => {
