@@ -1,37 +1,117 @@
-# @briefgate/mcp
+# BriefGate
 
-**Stop your coding agent stalling on client logos, copy and credentials.**
+**Client intake for AI coding agents.**
 
-![BriefGate demo: an intake being defined, the client filling the portal, results coming back](https://briefgate.dev/assets/demo/briefgate-demo.gif)
-
-[Watch as MP4 (47 s)](https://briefgate.dev/assets/demo/briefgate-demo.mp4)
-
-BriefGate is the first client intake tool built for AI agents. Your agent declares what it needs (`define_intake`), BriefGate generates a branded portal and chases the client automatically with email reminders, and your agent retrieves fully typed assets (`get_intake_results`) and keeps building.
+Your agent can build the website.
+BriefGate gets the missing things from the client.
 
 ```
-Agent: define_intake(items=[logo, copy, wp_admin])
-BriefGate: → sends invite email → chases client every few days
-Client:    fills in the portal (mobile-friendly, no login required)
-Agent: get_intake_results() → { logo: "https://signed-url/logo.svg", wp_admin: "s3cr3t" }
-Agent: keeps building the website ✅
+Claude Code / Cursor / Codex → BriefGate → Client portal
+  → Files · copy · credentials · structured data → Agent continues building
 ```
 
-## Quickstart — Claude Code
+![BriefGate demo: an intake being defined, the client filling the portal, results coming back](https://briefgate.dev/assets/demo/killer-demo.gif)
 
-**Option 1 — sign in, nothing to copy:**
+[Watch as MP4 (25 s)](https://briefgate.dev/assets/demo/killer-demo.mp4) · [Full 47 s walkthrough](https://briefgate.dev/assets/demo/briefgate-demo.mp4)
+
+## The problem
+
+Agents are fast. The bottleneck is the human on the other side of the project.
+
+Somewhere in the middle of building, the agent needs something only the client has: a logo, homepage copy, brand colors, opening hours, hosting credentials, an API key, a piece of structured data like a price list. None of that exists in the chat, and none of it can be guessed.
+
+The usual move is to stop and ask the developer to go chase the client by email. Instead, the agent creates a BriefGate intake. BriefGate emails the client, collects what comes back, chases automatically when it doesn't, and returns typed results the agent can use directly. The agent keeps building in the meantime.
+
+## Quickstart
+
+**Claude Code — hosted, no key to manage:**
+
+```bash
+claude mcp add --transport http briefgate https://mcp.briefgate.dev/mcp
+```
+
+Then run `/mcp` in Claude Code, pick **briefgate**, and choose **Authenticate**.
+
+**Claude Code — local package:**
 
 ```bash
 claude mcp add briefgate -- npx -y @briefgate/mcp
 npx -y @briefgate/mcp login
 ```
 
-`login` prints a short code and a URL, tries to open your browser to it, and waits (up to 10 minutes) for you to click **Allow**. On success it prints `Signed in as <account>` and exits; the key lands in `~/.briefgate/credentials.json` (mode `0600`) and the server picks it up automatically — no restart, nothing to paste into config. `npx -y @briefgate/mcp logout` removes it again and best-effort revokes it on the server too.
+Prefer to skip sign-in entirely? Get a key at [briefgate.dev](https://briefgate.dev?utm_source=github&utm_medium=readme&utm_campaign=mcp_launch) (free tier, no card) and pass it as `BRIEFGATE_API_KEY`.
 
-Prefer to sign in from inside the agent instead of a terminal? Skip the `login` command above and just ask Claude Code to "call the briefgate `login` tool" instead — same flow, one call at a time. See [Sign in without an API key](#sign-in-without-an-api-key).
+**Cursor** — add to `.cursor/mcp.json`:
 
-Prefer connecting straight to the hosted endpoint instead of running the package locally? `claude mcp add --transport http briefgate https://mcp.briefgate.dev/mcp` walks you through OAuth in the browser — see [Hosted endpoint + OAuth](#hosted-endpoint--oauth) below.
+```json
+{
+  "mcpServers": {
+    "briefgate": {
+      "command": "npx",
+      "args": ["-y", "@briefgate/mcp"]
+    }
+  }
+}
+```
 
-**Option 2 — paste an API key** (for CI, scripts, or if you'd rather manage the key yourself). Get one at [briefgate.dev](https://briefgate.dev) (free tier available, no card required):
+Then run `npx -y @briefgate/mcp login`, or ask the agent to call the `login` tool.
+
+**Codex:**
+
+```bash
+codex mcp add briefgate --env BRIEFGATE_API_KEY=bg_live_xxxxx -- npx -y @briefgate/mcp
+```
+
+Full setup details, manual config, and API-key precedence: see [Reference](#reference) below.
+
+## Example: building a client's website
+
+An agent is building a website for a restaurant. It has the layout and the booking flow, but it still needs the logo, a hero photo, the opening hours, a short description of the restaurant, the social media links, and admin access to the client's WordPress install. It calls `define_intake`:
+
+```json
+{
+  "project_name": "Website for Trattoria Bella",
+  "client": { "email": "owner@trattoriabella.example", "name": "Marco", "language": "en" },
+  "items": [
+    { "key": "logo", "type": "image", "label": "Restaurant logo",
+      "constraints": { "formats": ["svg", "png"], "min_width": 512 } },
+    { "key": "hero_image", "type": "image", "label": "Hero photo for the homepage" },
+    { "key": "opening_hours", "type": "structured", "label": "Opening hours",
+      "schema": { "type": "object", "properties": { "mon_fri": { "type": "string" }, "sat": { "type": "string" }, "sun": { "type": "string" } } } },
+    { "key": "about_copy", "type": "longtext", "label": "Short description of the restaurant" },
+    { "key": "social_links", "type": "structured", "label": "Social media links" },
+    { "key": "wp_admin", "type": "secret", "label": "WordPress admin credentials" }
+  ]
+}
+```
+
+From there, BriefGate (1) creates a branded portal, (2) emails the client, (3) validates each asset as it comes in, (4) chases the client automatically until everything is submitted, and (5) notifies the agent when it's done.
+
+The agent keeps building the layout, the booking flow, and everything else that doesn't depend on this — then calls `get_intake_results(intake_id)` and gets back typed data and signed URLs for the files, plus a one-time reveal of the WordPress credentials. It stores the secret and continues.
+
+## Why not a form?
+
+| Generic form | BriefGate |
+|---|---|
+| Human creates the form | Agent declares what it needs |
+| Human reads results | Agent consumes typed results |
+| Generic answers | Typed items |
+| Manual follow-up | Automatic chasing |
+| Spreadsheet mindset | API / MCP workflow |
+| Credentials are awkward | Secret item + controlled reveal |
+| Human workflow | Agent workflow |
+
+BriefGate is not trying to replace every form builder. It is designed for the point where an AI agent needs information from a human.
+
+Free tier, no card required. BriefGate is a hosted service — this repository is the open-source MCP client, MIT licensed. Sign up at [briefgate.dev](https://briefgate.dev?utm_source=github&utm_medium=readme&utm_campaign=mcp_launch).
+
+## Reference
+
+Everything below is unchanged technical detail: manual setup, environment variables, HTTP/OAuth mode, the full tool reference, webhooks, pricing, and legal.
+
+### Claude Code: manual setup and API keys
+
+**Paste an API key** (for CI, scripts, or if you'd rather manage the key yourself). Get one at [briefgate.dev](https://briefgate.dev) (free tier available, no card required):
 
 ```bash
 claude mcp add briefgate \
@@ -59,38 +139,9 @@ Or add manually to `~/.claude/settings.json`:
 
 **Verify it loaded** — run `/mcp` in Claude Code and look for `briefgate` with 15 tools.
 
-## Quickstart — Cursor / Codex / other MCP clients
+The same local-package and API-key setup works for any MCP client that runs the package locally (Cursor, Codex, others) — register it with no key at all and run `login`, or paste `BRIEFGATE_API_KEY` into that client's own MCP config the same way.
 
-`login` / `logout` work the same way for any client that runs the package locally: register it with no key at all, then either run `npx -y @briefgate/mcp login` yourself or ask the agent to call the `login` tool.
-
-```json
-{
-  "mcpServers": {
-    "briefgate": {
-      "command": "npx",
-      "args": ["-y", "@briefgate/mcp"]
-    }
-  }
-}
-```
-
-Or paste an API key instead, add to your MCP config (usually `.cursor/mcp.json` or similar):
-
-```json
-{
-  "mcpServers": {
-    "briefgate": {
-      "command": "npx",
-      "args": ["-y", "@briefgate/mcp"],
-      "env": {
-        "BRIEFGATE_API_KEY": "bg_live_..."
-      }
-    }
-  }
-}
-```
-
-## Sign in without an API key
+### Sign in without an API key
 
 Two ways to get a key onto this machine without pasting one — both run the same device-authorization flow (RFC 8628) against the same credential file, so pick whichever fits how you're using the package.
 
@@ -114,7 +165,7 @@ Same flow, for a client that can't block a terminal on your click. `login` is **
 
 **Either way**, the key lands in `~/.briefgate/credentials.json` (directory mode `0700`, file mode `0600`; override the path with `BRIEFGATE_CREDENTIALS_FILE`), keyed by which BriefGate server it's for so a staging `BRIEFGATE_BASE_URL` and production never collide. An explicit key always wins over a stored one — `--api-key`, then `BRIEFGATE_API_KEY`, then whatever `login` last saved — and `login` says so instead of running the flow when one of those is already set. Neither the subcommands nor the tools apply to the shared hosted endpoint (`mcp.briefgate.dev`) — see [Hosted endpoint + OAuth](#hosted-endpoint--oauth), where connecting a client triggers real OAuth instead.
 
-## Environment variables
+### Environment variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -129,7 +180,7 @@ Same flow, for a client that can't block a terminal on your click. `login` is **
 
 `--api-key bg_live_...` is also accepted on the command line, ahead of `BRIEFGATE_API_KEY` in priority. `login` and `logout` are also accepted as the first command-line argument (`npx @briefgate/mcp login`), instead of `--http`/no flag.
 
-## HTTP (Streamable HTTP) mode
+### HTTP (Streamable HTTP) mode
 
 For remote or multi-session deployments, start the server in HTTP mode:
 
@@ -139,7 +190,7 @@ BRIEFGATE_API_KEY=bg_live_... npx @briefgate/mcp --http --port 3000
 
 The server binds to `127.0.0.1` only and includes DNS-rebinding protection. Behind a reverse proxy, terminate TLS there and forward to the local port — do not expose the port directly.
 
-## Hosted endpoint + OAuth
+### Hosted endpoint + OAuth
 
 Set `BRIEFGATE_MCP_PUBLIC_HOST` to the hostname the server is published under and
 it becomes a shared, multi-customer endpoint: each caller sends its own key as
@@ -194,9 +245,9 @@ keeps behaving exactly as before, including an absent key reaching
 `initialize`/`tools/list` and a plain `Authorization: Bearer ...` header
 working with no OAuth involved.
 
-## Tools
+### Tools
 
-### `define_intake`
+#### `define_intake`
 
 Create a new client intake — a branded portal where the client submits the assets you need. BriefGate sends the invite email and chases the client automatically until everything is collected.
 
@@ -242,7 +293,7 @@ items:
 
 Returns `{ intake_id, portal_url, status }`. Save `intake_id` for all follow-up calls.
 
-### `get_intake_status`
+#### `get_intake_status`
 
 Check which items are submitted, pending, or need revision. Includes the history of automated chase emails and when the client last opened the portal.
 
@@ -252,7 +303,7 @@ intake_id: "in_8f3k"
 
 Returns per-item status and a full chase history.
 
-### `get_intake_results`
+#### `get_intake_results`
 
 Retrieve typed submitted values. Files are signed URLs (valid 24 hours). **Secrets are one-time** — decrypted and returned on the first call only; store them before moving on.
 
@@ -264,7 +315,7 @@ include_pending: false  // omit unsubmitted items
 
 Returns `{ results: { logo: "https://signed...", hero_copy: "text...", wp_admin: "s3cr3t" }, meta: { ... } }`.
 
-### `request_revision`
+#### `request_revision`
 
 Ask the client to resubmit an item with a note explaining what is wrong.
 
@@ -276,7 +327,7 @@ note: "Logo is blurry — we need at least 512 px wide in SVG or PNG with a tran
 
 Returns `{ status: "revision_requested", item_key }`.
 
-### `send_chase`
+#### `send_chase`
 
 Send a manual reminder outside the automatic schedule. Use when a deadline is approaching or email attempts have failed.
 
@@ -286,7 +337,7 @@ intake_id: "in_8f3k"
 
 Returns `{ sent: true }`.
 
-### `list_intakes`
+#### `list_intakes`
 
 List all intakes across projects, optionally filtered by status, client email, folder, or a text search.
 
@@ -301,7 +352,7 @@ offset: 0
 
 Returns `{ intakes: [...], total }`.
 
-### `add_items`
+#### `add_items`
 
 Add new items to an already-sent intake — for example a favicon you forgot, or additional credentials needed mid-project.
 
@@ -313,7 +364,7 @@ items:
 
 Returns the updated intake.
 
-### `update_item`
+#### `update_item`
 
 Change an item's definition after the intake was sent — the type, label, help text or constraints. Use this when you asked for the wrong thing, e.g. you requested an image but the client has a PDF.
 
@@ -327,7 +378,7 @@ discard_submitted_value: false      // true is required if the change invalidate
 
 Returns the updated item. If the client already submitted a value that the new definition would reject, the call fails with `item_answer_would_be_discarded` until you pass `discard_submitted_value: true`.
 
-### `update_intake`
+#### `update_intake`
 
 Change settings on an already-sent intake — project name, due date, reminder cadence, quiet hours, the client brief, or the client's name, phone, language, and timezone. Use this instead of deleting and recreating the intake, which would re-send the invite.
 
@@ -344,7 +395,7 @@ If any chase-related field changes (`chase_schedule`, `chase_interval`, `chase_i
 
 The client's e-mail address cannot be changed here — the portal link and login are bound to it. Use `manage_recipients` for that. Fails if the intake is archived. Returns the full, updated intake object.
 
-### `manage_recipients`
+#### `manage_recipients`
 
 Add, remove, or reinstate a person who receives an intake's invite and reminders, alongside or instead of the primary client.
 
@@ -357,7 +408,7 @@ name: "Petr"                        // only used with action="add"
 
 `action="add"` invites another address the same way `also_notify` does at `define_intake` time. `action="remove"` stops future reminders to that address. `action="reinstate"` is for a bounce that was wrong — the person did get the e-mail — it clears the bounce flag so reminders resume, and re-plans the chase schedule from now if that address was the only one still being chased.
 
-### `manage_webhook`
+#### `manage_webhook`
 
 Register, list or remove a webhook endpoint so events are pushed to your service instead of you polling.
 
@@ -374,7 +425,7 @@ Because an agent receives the secret in a tool result, it can come to rest where
 
 Only register an endpoint you can actually receive on. An agent running in a terminal has no public HTTPS address; for that case register nothing and check on a schedule instead (see below).
 
-### `list_folders`
+#### `list_folders`
 
 List the folders in your account, used to group intakes by client or project. Takes no arguments.
 
@@ -382,7 +433,7 @@ Call this before `create_folder` or before setting `folder_id` on `define_intake
 
 Returns `{ folders: [{ id, name, sort_order, intake_count, created_at }] }`.
 
-### `create_folder`
+#### `create_folder`
 
 Create a new folder to group intakes, e.g. one per client.
 
@@ -392,19 +443,19 @@ name: "Acme Inc"
 
 Call `list_folders` first and reuse a matching folder — only create one when none of the existing folders fits. Fails with `folder_exists` if a folder with this name already exists. Returns the created folder.
 
-### `login`
+#### `login`
 
 Sign in without an API key — see [Sign in without an API key](#sign-in-without-an-api-key). Takes no arguments.
 
 Call it whenever another tool reports "Not signed in" or that the stored key was revoked or expired. The first call starts a device-authorization flow and returns a URL and a short code immediately; call it again (any time) to check whether it's been approved yet. Has no effect — it says so instead — if `--api-key` or `BRIEFGATE_API_KEY` already supplies a key. Not available on the hosted endpoint. Same flow as running `npx @briefgate/mcp login` from a terminal (which blocks until approved instead of needing a second call) — see [Sign in without an API key](#sign-in-without-an-api-key).
 
-### `logout`
+#### `logout`
 
 Removes the API key `login` stored locally for this BriefGate server, and best-effort revokes it on the server too. Takes no arguments.
 
 If the revoke call fails — no network, the API unreachable — the local copy is still removed; the response says so and points at the BriefGate dashboard to revoke it there instead. Not available on the hosted endpoint. Same effect as running `npx @briefgate/mcp logout` from a terminal — see [Sign in without an API key](#sign-in-without-an-api-key).
 
-## Decisions — questions for the developer
+### Decisions — questions for the developer
 
 An agent building something hits things only the account holder can settle: *does the discounted plan cost $19 or $29?* Stopping to wait wastes the run; picking silently buries the assumption. A decision is the third option — pose the question, record the answer you are proceeding on, keep building.
 
@@ -431,7 +482,7 @@ The proposal is stored apart from the real answer, so it can never be mistaken f
 
 Owner items never reach the client portal, never appear in a reminder, and never hold up completion — the intake is finished when the *client* is finished.
 
-## Knowing when the client is done
+### Knowing when the client is done
 
 Nothing pushes to an MCP client on its own — MCP is request/response, so the server cannot wake your agent when the client finishes. `define_intake` therefore returns a `follow_up` block naming the mechanism that fits your setup:
 
@@ -452,7 +503,7 @@ Events worth acting on: `intake.completed` (everything is in) and `intake.overdu
 
 The cadence tightens near the deadline (24h normally, 12h inside a week, 6h inside two days) and is not tied to the reminder schedule: a client can submit everything at 2am having never opened a reminder.
 
-## End-to-end example
+### End-to-end example
 
 ```
 # System prompt excerpt
@@ -479,7 +530,7 @@ You are a web development agent. When you need client assets:
    is stuck and let them pick up the phone.
 ```
 
-## Verifying webhooks
+### Verifying webhooks
 
 BriefGate signs every webhook with HMAC-SHA256 to prevent forgery and replay attacks. The `@briefgate/mcp` package exports a ready-made helper:
 
@@ -489,7 +540,7 @@ import { verifyWebhookSignature, parseWebhookEvent } from "@briefgate/mcp/webhoo
 
 The signature lives in the `X-BriefGate-Signature` header as `t=<unix>,v1=<hex>`:
 
-### Fastify (recommended)
+#### Fastify (recommended)
 
 ```typescript
 import Fastify from "fastify";
@@ -522,7 +573,7 @@ app.post("/briefgate/webhook", (request, reply) => {
 });
 ```
 
-### Express
+#### Express
 
 ```typescript
 import express from "express";
@@ -554,7 +605,7 @@ app.post(
 );
 ```
 
-### Webhook events
+#### Webhook events
 
 | Event | When | Key fields |
 |---|---|---|
@@ -564,7 +615,7 @@ app.post(
 | `chase.bounced` | A reminder bounced | `channel`, `reason`, `recipient`, `still_chasing` |
 | `intake.stalled` | 3 reminders sent, no response | `attempts` |
 
-## Pricing
+### Pricing
 
 Launch offer: code `LAUNCH20` gives 20% off Solo and Agency for the lifetime of the subscription, valid until 4 October 2026 (new customers, plans only).
 
@@ -580,11 +631,11 @@ Launch offer: code `LAUNCH20` gives 20% off Solo and Agency for the lifetime of 
 
 Full pricing at `GET https://api.briefgate.dev/pricing.json` (no auth required — agents can read it directly).
 
-## Data residency
+### Data residency
 
 BriefGate is hosted in the EU: application servers at netcup GmbH in Nuremberg, Germany; files in Cloudflare R2 under EU jurisdiction. See the [GDPR notes](https://briefgate.dev/docs/gdpr) and the [DPA](https://briefgate.dev/docs/dpa).
 
-## Privacy Policy
+### Privacy Policy
 
 This package is a thin client: it holds no data of its own and sends nothing
 anywhere except to the BriefGate API at `api.briefgate.dev`, using the API key
@@ -599,7 +650,7 @@ how to have it deleted is covered in full here:
 
 Contact for privacy requests: privacy@briefgate.dev
 
-## Contributing
+### Contributing
 
 This repository is the BriefGate MCP client only — a thin wrapper over the
 public BriefGate REST API. The BriefGate service itself is closed source.
@@ -613,7 +664,7 @@ npm run check       # all three
 npm run build       # compile to dist/
 ```
 
-## License
+### License
 
 MIT — use freely in commercial projects.
 
