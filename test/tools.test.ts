@@ -16,6 +16,7 @@ import {
   callManageWebhook,
   callListFolders,
   callCreateFolder,
+  executeTool,
   type ToolResult,
 } from '../src/tools.js';
 import type { BriefGateConfig } from '../src/client.js';
@@ -1336,6 +1337,8 @@ describe('tool annotations', () => {
       expect(tool.annotations?.title, `${tool.name} has no annotations.title`).toBeTruthy();
       expect(typeof tool.annotations?.readOnlyHint, `${tool.name}`).toBe('boolean');
       expect(typeof tool.annotations?.destructiveHint, `${tool.name}`).toBe('boolean');
+      // OpenAI's directory rejects a tool with any of the four hints missing.
+      expect(typeof tool.annotations?.idempotentHint, `${tool.name}`).toBe('boolean');
       // Every tool reaches the BriefGate API over the network — `logout`
       // included, now that it best-effort revokes the key server-side.
       expect(tool.annotations?.openWorldHint, `${tool.name}`).toBe(true);
@@ -1364,5 +1367,61 @@ describe('tool annotations', () => {
       'manage_webhook',
       'update_item',
     ]);
+  });
+});
+
+// ─── executeTool: name → handler dispatch ─────────────────────────────────────
+//
+// The call* tests above exercise each handler directly. What an MCP host
+// actually sends is the tool name, so a typo in one `case` would leave a tool
+// advertised in TOOLS but answering "Unknown tool". login and logout are
+// dispatched in tools-login.test.ts — logout touches the credentials file.
+
+describe('executeTool dispatch', () => {
+  const intake = { intake_id: 'in_1' };
+  const cases: [name: string, args: Record<string, unknown>, path: string][] = [
+    [
+      'define_intake',
+      {
+        project_name: 'Test Project',
+        client: { email: 'client@example.com', name: 'Jana Nováková' },
+        items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+      },
+      '/v1/intakes',
+    ],
+    ['get_intake_status', intake, '/v1/intakes/in_1/status'],
+    ['get_intake_results', intake, '/v1/intakes/in_1/results'],
+    ['request_revision', { ...intake, item_key: 'logo', note: 'Logo is blurry' }, '/v1/intakes/in_1/revision'],
+    ['send_chase', { ...intake, channel: 'email' }, '/v1/intakes/in_1/chase'],
+    ['list_intakes', {}, '/v1/intakes'],
+    ['add_items', { ...intake, items: [{ key: 'favicon', type: 'image', label: 'Favicon' }] }, '/v1/intakes/in_1/items'],
+    ['update_item', { ...intake, item_key: 'logo', label: 'Logo firmy' }, '/v1/intakes/in_1/items/logo'],
+    ['update_intake', { ...intake, due_date: '2026-12-01' }, '/v1/intakes/in_1'],
+    ['manage_recipients', { ...intake, action: 'add', email: 'extra@example.com' }, '/v1/intakes/in_1/recipients'],
+    ['manage_webhook', { action: 'list' }, '/v1/webhooks'],
+    ['list_folders', {}, '/v1/folders'],
+    ['create_folder', { name: 'Acme Inc' }, '/v1/folders'],
+  ];
+
+  it.each(cases)('routes %s to its endpoint', async (name, args, path) => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1', webhooks: [], folders: [] }));
+
+    const result = await executeTool(name, config, args);
+
+    expect(result.isError, result.text).toBeFalsy();
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string];
+    expect(new URL(url).pathname).toBe(path);
+  });
+
+  it('dispatches every advertised tool', () => {
+    const covered = new Set([...cases.map(([name]) => name), 'login', 'logout']);
+    expect(TOOLS.map(t => t.name).filter(name => !covered.has(name))).toEqual([]);
+  });
+
+  it('reports an unknown tool name as an error', async () => {
+    const result = await executeTool('delete_intake', config, {});
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('delete_intake');
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
