@@ -14,6 +14,10 @@ Claude Code / Cursor / Codex → BriefGate → Client portal
 
 [Watch as MP4 (25 s)](https://briefgate.dev/assets/demo/killer-demo.mp4) · [Full 47 s walkthrough](https://briefgate.dev/assets/demo/briefgate-demo.mp4)
 
+[Website](https://briefgate.dev?utm_source=github&utm_medium=readme&utm_campaign=mcp_launch) · [MCP reference](https://briefgate.dev/docs/mcp) · [llms.txt](https://briefgate.dev/llms.txt) · [Guides and checklists](https://briefgate.dev/guides)
+
+Not working with an agent? The same intakes can be created from the browser dashboard — see the [dashboard quickstart](https://briefgate.dev/docs/dashboard-quickstart).
+
 ## The problem
 
 Agents are fast. The bottleneck is the human on the other side of the project.
