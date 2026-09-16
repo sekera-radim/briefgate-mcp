@@ -1,0 +1,51 @@
+{
+  "manifest_version": "0.3",
+  "name": "briefgate",
+  "display_name": "BriefGate",
+  "version": "0.9.0",
+  "description": "Client intake for AI agents: request files, texts and credentials from a client, chase automatically, get notified when complete.",
+  "long_description": "BriefGate is a client-intake service an AI coding agent drives over MCP. Define what you need from a client (files, texts, choices, structured data, credentials), BriefGate emails them a no-account portal link, chases them automatically on a schedule until everything arrives, and hands typed results back to the agent — including secrets, decrypted and released exactly once. Works standalone from a dashboard too, for the parts of a project that don't involve an agent.",
+  "author": {
+    "name": "Radim Sekera",
+    "email": "privacy@briefgate.dev",
+    "url": "https://briefgate.dev"
+  },
+  "homepage": "https://briefgate.dev",
+  "documentation": "https://briefgate.dev/docs/mcp",
+  "support": "https://briefgate.dev/docs/security",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sekera-radim/briefgate-mcp"
+  },
+  "license": "MIT",
+  "keywords": [
+    "client-intake",
+    "onboarding",
+    "freelance",
+    "credentials",
+    "agent"
+  ],
+  "privacy_policies": [
+    "https://briefgate.dev/docs/privacy"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "BRIEFGATE_API_KEY": "${user_config.api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "BriefGate API key",
+      "description": "Optional. Get a free-tier key at https://briefgate.dev, or leave this blank and call the `login` tool from within Claude Desktop to sign in via device flow instead.",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}

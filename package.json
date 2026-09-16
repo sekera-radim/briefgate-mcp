@@ -49,6 +49,7 @@
     "lint": "eslint src test",
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run test",
+    "package:mcpb": "node scripts/build-mcpb.mjs",
     "prepublishOnly": "npm run build",
     "version": "node scripts/sync-server-json.mjs && git add server.json"
   },

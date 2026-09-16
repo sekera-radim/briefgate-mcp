@@ -74,6 +74,8 @@ gemini extensions install https://github.com/sekera-radim/briefgate-mcp
 
 It authenticates the same way as the other hosted clients above — via OAuth, on first use.
 
+**Claude Desktop** — one-click install as a [Desktop Extension](https://www.anthropic.com/engineering/desktop-extensions) (`.mcpb`), running the local `@briefgate/mcp` package instead of the hosted endpoint. Build details: see [MCPB bundle](#mcpb-bundle-claude-desktop-extension) below.
+
 Full setup details, manual config, and API-key precedence: see [Reference](#reference) below.
 
 ## Example: building a client's website
@@ -661,6 +663,26 @@ how to have it deleted is covered in full here:
 - **Data Processing Agreement** — https://briefgate.dev/docs/dpa
 
 Contact for privacy requests: privacy@briefgate.dev
+
+### MCPB bundle (Claude Desktop Extension)
+
+[`manifest.json`](manifest.json) at the repo root packages the local
+`@briefgate/mcp` package as a one-click Claude Desktop install
+([MCPB spec](https://github.com/anthropics/mcpb)). It runs `dist/index.js`
+locally and prompts for an optional API key at install time — the same
+`login`/`BRIEFGATE_API_KEY` setup documented above, not the hosted
+endpoint's OAuth flow.
+
+Build the bundle (production dependencies only, packed in a throwaway
+staging directory so it never touches this repo's own `node_modules`):
+
+```bash
+npm run package:mcpb
+```
+
+This produces `briefgate.mcpb` at the repo root (gitignored — install it
+locally to test, don't commit it). Not yet submitted anywhere; see
+`scripts/build-mcpb.mjs` for what the command does.
 
 ### Contributing
 
