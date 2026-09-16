@@ -246,4 +246,12 @@ describe('local mode (no BRIEFGATE_MCP_PUBLIC_HOST) is unchanged', () => {
     const res = await rpc(baseUrl, initializeRequest);
     expect(res.status).toBe(200);
   });
+
+  it('advertises server instructions in the initialize result, explaining what BriefGate is and when to use it', async () => {
+    const res = await rpc(baseUrl, initializeRequest);
+    const body = (await res.json()) as { result?: { instructions?: string } };
+    expect(body.result?.instructions).toBeTruthy();
+    expect(body.result?.instructions).toContain('define_intake');
+    expect(body.result?.instructions?.length).toBeLessThanOrEqual(1200);
+  });
 });

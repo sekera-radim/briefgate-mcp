@@ -194,6 +194,16 @@ if (!cliSubcommand) {
     onToolError?: (message: string) => void;
   }
 
+  // Surfaced in the `initialize` response so a client can decide WHEN to reach
+  // for these tools without having read every tool description first. Keep it
+  // in sync with the individual tool descriptions in tools.ts rather than
+  // contradicting them.
+  const SERVER_INSTRUCTIONS = `BriefGate lets an AI agent collect files, text, choices, or credentials from a human who is not in this conversation (a client, colleague, or customer) — it emails them a no-account portal link and chases them automatically until everything is submitted.
+
+Use it when the task is blocked on input only that outside person can provide, especially when they may take days and need reminders. Do NOT use it when the needed information is already available to you, or when the user in THIS conversation can simply answer.
+
+Normal flow: call define_intake with the items you need, tell the user it was sent, then check back later with get_intake_status — "not ready" is a normal state, not an error. Once status is "completed", call get_intake_results to retrieve values. Use request_revision if a submitted item is unusable. Secret-type items (passwords, API keys) are revealed in plaintext exactly once by get_intake_results — store them immediately, you cannot retrieve them again.`;
+
   // Returns a fresh Server instance bound to one caller's config.
   //
   // HTTP mode builds one per request, which is what makes a public deployment
@@ -202,7 +212,7 @@ if (!cliSubcommand) {
   function buildServer(cfg: BriefGateConfig, opts: BuildServerOptions): Server {
     const server = new Server(
       { name: '@briefgate/mcp', version: PACKAGE_VERSION },
-      { capabilities: { tools: {} } },
+      { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
