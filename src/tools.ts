@@ -464,11 +464,11 @@ Example:
   ]
 }
 
-Item types: text, longtext, file, file_list, image, color_list, select (one of options[]), multiselect (several of options[]; min_count/max_count in constraints), boolean, url, secret (encrypted; revealed exactly once — store the value on the first read), structured (requires schema with JSON Schema).
+Item types: text, longtext, file, file_list, image, color_list, select (one of options[]), multiselect (several of options[]; min_count/max_count in constraints), boolean, url, secret (encrypted; the value is shown only on the first retrieval), structured (requires schema with JSON Schema).
 
-DECISIONS — questions for the developer, not the client. An item with assignee="owner" and type select/multiselect is a question only the account holder can settle ("does the discounted plan cost 19 or 29?"). Never stop and wait for one: give it a "proposed" answer and carry on building. proposed = { value: "19", rationale: "matches the competitor we benchmarked" } records what you went with and why; it is stored separately from the real answer, so it can never be mistaken for one the developer gave.
+DECISIONS — questions for the account holder, not the client. An item with assignee="owner" and type select/multiselect is a question only the account holder can answer ("does the discounted plan cost 19 or 29?"). It can carry an optional "proposed" answer, e.g. proposed = { value: "19", rationale: "matches the competitor we benchmarked" }, which is stored separately from the account holder's answer and clearly labelled as a proposal.
 
-Read the answer back from get_intake_results. meta.<key>.decided_by tells you which it is: "owner" means a person settled it, "agent_proposal" means the build is still standing on your own pick and may yet be overruled. You cannot confirm your own proposal — answering is the developer's, through the dashboard.
+get_intake_results returns the current answer with meta.<key>.decided_by: "owner" when the account holder answered in the dashboard, "agent_proposal" while only the proposal exists. A proposal cannot be confirmed through this API; only the account holder answers it.
 Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they become property names in get_intake_results.`,
     inputSchema: {
       type: 'object' as const,
@@ -835,15 +835,15 @@ This is also the call a scheduled check should make when no webhook is registere
     },
     description: `Retrieve the typed submitted values from a client intake.
 
-Files are returned as signed URLs valid for 24 hours — download them promptly or store the URL for reuse within that window.
+Files are returned as signed download URLs that expire after 24 hours.
 
-Secrets (type=secret, e.g. passwords, API keys) are decrypted and returned in plaintext on the FIRST call only. After the first retrieval the secret is marked as read: subsequent calls return first_reveal: false in meta and omit the value. Store secrets immediately before proceeding — you cannot retrieve them again.
+Secrets (type=secret, e.g. passwords, API keys) are decrypted and included only in the first retrieval. Later calls return first_reveal: false in meta and omit the value, so the user should be ready to receive a secret before this tool is called on an intake that contains one.
 
 Use only_new=true to get only items submitted since the last call (useful in webhook-driven workflows). Use include_pending=true to also return partially filled items.
 
 Returns { results: { <key>: <typed value> }, meta: { <key>: { type, status, submitted_at, first_reveal? } } }.
 
-For a DECISION (assignee=owner, type select/multiselect) results holds the answer currently standing and meta.<key>.decided_by says whose it is: "owner" once a person has settled it, "agent_proposal" while it is still your own pick. A proposed decision is returned even without include_pending — you need back the assumption you are building on. It does not bump revision, so an only_new read surfaces exactly the decisions a person has since answered or changed.`,
+For a DECISION item (assignee=owner, type select/multiselect), results holds the current answer and meta.<key>.decided_by is "owner" (answered by the account holder) or "agent_proposal" (only a proposal exists). Proposals are returned even without include_pending. A proposal does not bump revision, so only_new returns decisions the account holder has answered or changed since the last call.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1400,7 +1400,7 @@ Fails if the address is not on the intake, or — for reinstate — if it never 
 
 Use this ONLY if you control a service that can receive public HTTPS requests. An agent running in a terminal cannot — for that case do not register anything and check on a schedule with get_intake_status instead. A registered endpoint that cannot receive produces failing deliveries and a false impression that the work is being watched.
 
-action="create" returns a "secret" exactly once. Store it somewhere durable outside this conversation: it is needed to verify the signature on every delivery (use verifyWebhookSignature from @briefgate/mcp/webhook) and it cannot be retrieved again. If it is ever exposed, there is no rotation in place — delete the endpoint and create a new one, which issues a fresh secret.
+action="create" returns a signing "secret" exactly once. The receiving service needs it to verify the signature on every delivery (verifyWebhookSignature from @briefgate/mcp/webhook), and it cannot be shown again. If it is ever exposed, there is no rotation in place — delete the endpoint and create a new one, which issues a fresh secret.
 
 Events: intake.completed (all required items in — the one to act on), item.submitted (a single item arrived), client.viewed (the client opened the portal), chase.bounced (a reminder failed to deliver), intake.overdue (the due date passed with required items outstanding — the one to act on when work is blocked), intake.stalled (fires only when the intake sets max_reminders; without it this event never arrives).`,
     inputSchema: {

@@ -566,7 +566,7 @@ You are a web development agent. When you need client assets:
 
 3. When intake.completed arrives (or the scheduled check reports "completed"),
    call get_intake_results. Download file URLs within 24 hours.
-   Store secrets immediately — they are one-time.
+   Secrets are shown only on the first retrieval.
 
 4. If a submitted asset does not meet requirements (blurry logo, broken URL),
    call request_revision with a clear note for the client.

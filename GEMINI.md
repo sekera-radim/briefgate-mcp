@@ -28,6 +28,6 @@ to respond and will need reminders.
 4. Once status is `completed`, call `get_intake_results` to retrieve the
    typed values. Use `request_revision` if a submitted item is unusable.
 
-Secret-type items (passwords, API keys) are revealed in plaintext exactly
-once by `get_intake_results` — store them immediately, they cannot be
-retrieved again.
+Secret-type items (passwords, API keys) are included only in the first
+`get_intake_results` response and cannot be shown again, so make sure the
+user is ready to receive them.

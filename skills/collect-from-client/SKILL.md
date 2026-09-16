@@ -53,9 +53,9 @@ hours or days to respond and will need reminders.
 ## Important: secrets are revealed once
 
 If an item is `type: secret` (a password, API key, or similar credential),
-`get_intake_results` decrypts and returns it in plaintext only on the FIRST
-call. Store it immediately — a later call reports that it was already
-revealed but does not return the value again.
+`get_intake_results` includes the value only in the first response. A later
+call reports that it was already revealed but does not return the value
+again, so make sure the user is ready to receive it.
 
 ## Other tools available
 

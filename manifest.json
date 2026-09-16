@@ -3,7 +3,7 @@
   "name": "briefgate",
   "display_name": "BriefGate",
   "icon": "icon.png",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Client intake for AI agents: request files, texts and credentials from a client, chase automatically, get notified when complete.",
   "long_description": "BriefGate is a client-intake service an AI coding agent drives over MCP. Define what you need from a client (files, texts, choices, structured data, credentials), BriefGate emails them a no-account portal link, chases them automatically on a schedule until everything arrives, and hands typed results back to the agent — including secrets, decrypted and released exactly once. Works standalone from a dashboard too, for the parts of a project that don't involve an agent.",
   "author": {

@@ -1,7 +1,7 @@
 {
   "name": "briefgate",
   "description": "Client intake for AI agents: request files, texts and credentials from a client, chase automatically, get notified when complete.",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "author": {
     "name": "Radim Sekera"
   },
