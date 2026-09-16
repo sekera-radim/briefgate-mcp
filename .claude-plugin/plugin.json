@@ -1,7 +1,7 @@
 {
   "name": "briefgate",
   "displayName": "BriefGate",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Client intake for AI coding agents: request files, texts and credentials from a client over MCP, chase automatically, get notified when the client is done.",
   "author": {
     "name": "Radim Sekera",

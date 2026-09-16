@@ -1668,6 +1668,10 @@ function validationError(issues: z.ZodIssue[]): ToolResult {
   return { text: `Validation error: ${messages}`, isError: true };
 }
 
+// The text is compact JSON on purpose: ChatGPT turns a long multi-line tool
+// output into a line-numbered document and the model may read only its first
+// lines, which hid submitted text values behind a file object's "url" line.
+//
 // Builds a ToolResult from a JSON-shaped value: the object is defined once and
 // backs both the human-readable `text` (stringified, for clients that only
 // read text) and `structuredContent` (the object itself, for clients that
@@ -1677,7 +1681,7 @@ function validationError(issues: z.ZodIssue[]): ToolResult {
 // interfaces without an index signature, which TypeScript does not consider
 // assignable to Record<string, unknown> even though every field is present.
 function jsonResult(value: object): ToolResult {
-  return { text: JSON.stringify(value, null, 2), structuredContent: value as Record<string, unknown> };
+  return { text: JSON.stringify(value), structuredContent: value as Record<string, unknown> };
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
