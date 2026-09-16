@@ -81,10 +81,10 @@ It authenticates the same way as the other hosted clients above — via OAuth, o
 **Any [Agent Skills](https://agentskills.io)-compatible tool** (OpenAI Codex, GitHub Copilot / VS Code, Cursor, Gemini CLI, and other clients on that standard) — install the [`collect-from-client`](skills/collect-from-client/SKILL.md) skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
 ```bash
-npx skills add sekera-radim/briefgate-mcp
+npx skills add https://github.com/sekera-radim/briefgate-mcp/tree/main/skills/collect-from-client
 ```
 
-This copies `SKILL.md` into that tool's local skills directory; the skill still assumes the `briefgate` MCP server (see the client-specific instructions above) is configured separately.
+The bare `owner/repo` shorthand the CLI's own docs show does not work against this layout as of `skills@1.5.26` — it either 404s against its registry or, given the plain repo URL, clones the whole repo and reports "No SKILL.md found" because ours lives a directory deeper than the root. The full `/tree/main/skills/<name>` URL above is what actually installs it; verified by running it in an empty scratch directory before documenting it. This copies `SKILL.md` into that tool's local skills directory; the skill still assumes the `briefgate` MCP server (see the client-specific instructions above) is configured separately.
 
 Full setup details, manual config, and API-key precedence: see [Reference](#reference) below.
 
