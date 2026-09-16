@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Ajv } from 'ajv';
 import {
   TOOLS,
   itemDefinitionSchema,
@@ -1423,5 +1424,224 @@ describe('executeTool dispatch', () => {
     expect(result.isError).toBe(true);
     expect(result.text).toContain('delete_intake');
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
+
+// ─── outputSchema / structuredContent ─────────────────────────────────────────
+//
+// A tool's outputSchema promises MCP/Apps-SDK clients a stable JSON shape for
+// structuredContent. jsonResult() (src/tools.ts) builds `text` and
+// structuredContent from the same object so they cannot drift apart, but
+// nothing stops a future edit to a TOOLS entry's outputSchema, or to what a
+// call* function returns, from breaking that promise — these tests lock both
+// halves against regression.
+
+const ajv = new Ajv({ strict: false, allErrors: true });
+
+// login/logout return human prose (see the comment on each TOOLS entry), not
+// JSON — there is no stable shape to declare an outputSchema for.
+const TOOLS_WITHOUT_OUTPUT_SCHEMA = new Set(['login', 'logout']);
+
+function outputSchemaOf(name: string): object | undefined {
+  return (TOOLS.find(t => t.name === name) as { outputSchema?: object } | undefined)?.outputSchema;
+}
+
+function expectStructuredContentValid(toolName: string, value: unknown): void {
+  const schema = outputSchemaOf(toolName);
+  if (!schema) throw new Error(`${toolName} has no outputSchema to validate against`);
+  expect(value, `${toolName} returned no structuredContent`).toBeDefined();
+  const validate = ajv.compile(schema);
+  const ok = validate(value);
+  expect(ok, `${toolName} structuredContent does not match its outputSchema: ${JSON.stringify(validate.errors)}`).toBe(true);
+}
+
+describe('tool outputSchema', () => {
+  it('declares an outputSchema for every tool except the documented prose ones', () => {
+    for (const tool of TOOLS) {
+      const schema = outputSchemaOf(tool.name);
+      if (TOOLS_WITHOUT_OUTPUT_SCHEMA.has(tool.name)) {
+        expect(schema, `${tool.name} should not have an outputSchema`).toBeUndefined();
+      } else {
+        expect(schema, `${tool.name} has no outputSchema`).toBeDefined();
+      }
+    }
+  });
+
+  it('compiles every declared outputSchema as valid JSON Schema', () => {
+    for (const tool of TOOLS) {
+      const schema = outputSchemaOf(tool.name);
+      if (!schema) continue;
+      expect(() => ajv.compile(schema), `${tool.name}'s outputSchema does not compile`).not.toThrow();
+    }
+  });
+});
+
+describe('structuredContent matches outputSchema', () => {
+  it('define_intake', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intake_id: 'in_1',
+      portal_url: 'https://p.briefgate.dev/1',
+      status: 'sent',
+      items: [{ key: 'logo', status: 'pending' }],
+      follow_up: {
+        recommended: 'schedule',
+        reason: 'no webhook registered',
+        webhook: { active_endpoints: 0, events: [], register_with: 'manage_webhook' },
+        schedule: { check_with: 'get_intake_status', every_hours: 24, until: '2026-12-01' },
+      },
+    }));
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expectStructuredContentValid('define_intake', result.structuredContent);
+  });
+
+  it('get_intake_status', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intake_id: 'in_1',
+      status: 'in_progress',
+      progress: { submitted: 1, total: 2 },
+      items: [{ key: 'logo', status: 'submitted', label: 'Logo', submitted_at: '2026-01-01T00:00:00Z' }],
+      chases: [{ channel: 'email', sent_at: '2026-01-01T00:00:00Z', status: 'delivered', attempt_no: 1 }],
+    }));
+    const result = await callGetIntakeStatus(config, { intake_id: 'in_1' });
+    expectStructuredContentValid('get_intake_status', result.structuredContent);
+  });
+
+  it('get_intake_results', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intake_id: 'in_1',
+      status: 'completed',
+      results: { logo: 'https://files.example/logo.png', hero_copy: 'Hello' },
+      meta: {
+        logo: { type: 'image', status: 'submitted', submitted_at: '2026-01-01T00:00:00Z' },
+        hero_copy: { type: 'longtext', status: 'submitted', submitted_at: '2026-01-01T00:00:00Z' },
+      },
+    }));
+    const result = await callGetIntakeResults(config, { intake_id: 'in_1' });
+    expectStructuredContentValid('get_intake_results', result.structuredContent);
+  });
+
+  it('request_revision', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ status: 'revision_requested', item_key: 'logo' }));
+    const result = await callRequestRevision(config, { intake_id: 'in_1', item_key: 'logo', note: 'blurry' });
+    expectStructuredContentValid('request_revision', result.structuredContent);
+  });
+
+  it('send_chase', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ sent: true }));
+    const result = await callSendChase(config, { intake_id: 'in_1' });
+    expectStructuredContentValid('send_chase', result.structuredContent);
+  });
+
+  it('list_intakes', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intakes: [{
+        intake_id: 'in_1',
+        project_name: 'Test',
+        client_email: 'client@example.com',
+        status: 'sent',
+        created_at: '2026-01-01T00:00:00Z',
+        portal_url: 'https://p.briefgate.dev/1',
+      }],
+      total: 1,
+    }));
+    const result = await callListIntakes(config, {});
+    expectStructuredContentValid('list_intakes', result.structuredContent);
+  });
+
+  it('add_items', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intake_id: 'in_1',
+      portal_url: 'https://p.briefgate.dev/1',
+      status: 'in_progress',
+      items: [{ key: 'favicon', status: 'pending' }],
+    }));
+    const result = await callAddItems(config, {
+      intake_id: 'in_1',
+      items: [{ key: 'favicon', type: 'image', label: 'Favicon' }],
+    });
+    expectStructuredContentValid('add_items', result.structuredContent);
+  });
+
+  it('update_item', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ item: { key: 'logo', type: 'image', label: 'Logo firmy' } }));
+    const result = await callUpdateItem(config, { intake_id: 'in_1', item_key: 'logo', label: 'Logo firmy' });
+    expectStructuredContentValid('update_item', result.structuredContent);
+  });
+
+  it('update_intake', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ intake_id: 'in_1', due_date: '2026-12-01' }));
+    const result = await callUpdateIntake(config, { intake_id: 'in_1', due_date: '2026-12-01' });
+    expectStructuredContentValid('update_intake', result.structuredContent);
+  });
+
+  it('manage_recipients — add', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ email: 'extra@example.com', added: true }));
+    const result = await callManageRecipients(config, { intake_id: 'in_1', action: 'add', email: 'extra@example.com' });
+    expectStructuredContentValid('manage_recipients', result.structuredContent);
+  });
+
+  it('manage_recipients — reinstate', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ email: 'extra@example.com', bounced_at: null, still_chasing: true }));
+    const result = await callManageRecipients(config, { intake_id: 'in_1', action: 'reinstate', email: 'extra@example.com' });
+    expectStructuredContentValid('manage_recipients', result.structuredContent);
+  });
+
+  it('manage_webhook — create', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      id: 'wh_1',
+      url: 'https://example.com/hook',
+      events: ['intake.completed'],
+      format: 'raw',
+      active: true,
+      created_at: '2026-01-01T00:00:00Z',
+      secret: 'whsec_abc',
+    }));
+    const result = await callManageWebhook(config, {
+      action: 'create',
+      url: 'https://example.com/hook',
+      events: ['intake.completed'],
+    });
+    expectStructuredContentValid('manage_webhook', result.structuredContent);
+  });
+
+  it('manage_webhook — list', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      webhooks: [{
+        id: 'wh_1',
+        url: 'https://example.com/hook',
+        events: ['intake.completed'],
+        format: 'raw',
+        active: true,
+        created_at: '2026-01-01T00:00:00Z',
+      }],
+    }));
+    const result = await callManageWebhook(config, { action: 'list' });
+    expectStructuredContentValid('manage_webhook', result.structuredContent);
+  });
+
+  it('manage_webhook — delete', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({ deleted: true }));
+    const result = await callManageWebhook(config, { action: 'delete', webhook_id: 'wh_1' });
+    expectStructuredContentValid('manage_webhook', result.structuredContent);
+  });
+
+  it('list_folders', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      folders: [{ id: 'fld_1', name: 'Acme', sort_order: 0, intake_count: 2, created_at: '2026-01-01T00:00:00Z' }],
+    }));
+    const result = await callListFolders(config, {});
+    expectStructuredContentValid('list_folders', result.structuredContent);
+  });
+
+  it('create_folder', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockOk({ id: 'fld_1', name: 'Acme', sort_order: 0, intake_count: 0, created_at: '2026-01-01T00:00:00Z' }),
+    );
+    const result = await callCreateFolder(config, { name: 'Acme' });
+    expectStructuredContentValid('create_folder', result.structuredContent);
   });
 });

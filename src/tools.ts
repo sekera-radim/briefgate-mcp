@@ -381,6 +381,51 @@ const defineIntakeSchema = z
 // none at all. get_intake_results is the one worth reading twice: it sounds like
 // a read and is not one.
 
+// Shared output-schema fragments, reused wherever more than one tool returns
+// the same shape verbatim (define_intake and add_items both echo FollowUpAdvice
+// from client.ts; manage_webhook's "list" branch and get_intake_status's item
+// list follow other client.ts types the same way).
+const FOLLOW_UP_SCHEMA = {
+  type: 'object' as const,
+  description:
+    'How to learn this intake is done — present unless a webhook already covers it. Mirrors FollowUpAdvice in client.ts.',
+  properties: {
+    recommended: { type: 'string', enum: ['webhook', 'schedule'] },
+    reason: { type: 'string' },
+    webhook: {
+      type: 'object',
+      properties: {
+        active_endpoints: { type: 'number' },
+        events: { type: 'array', items: { type: 'string' } },
+        register_with: { type: 'string' },
+      },
+      required: ['active_endpoints', 'events', 'register_with'],
+      additionalProperties: false,
+    },
+    schedule: {
+      type: 'object',
+      properties: {
+        check_with: { type: 'string' },
+        every_hours: { type: 'number' },
+        until: { type: 'string' },
+      },
+      required: ['check_with', 'every_hours', 'until'],
+      additionalProperties: false,
+    },
+  },
+  required: ['recommended', 'reason', 'webhook', 'schedule'],
+  additionalProperties: false,
+};
+
+const WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES = {
+  id: { type: 'string' },
+  url: { type: 'string' },
+  events: { type: 'array', items: { type: 'string' } },
+  format: { type: 'string' },
+  active: { type: 'boolean' },
+  created_at: { type: 'string' },
+} as const;
+
 export const TOOLS = [
   {
     name: 'define_intake',
@@ -681,6 +726,26 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
       },
       required: ['project_name', 'client', 'items'],
     },
+    // Trimmed to exactly what callDefineIntake returns (see the JSON.stringify
+    // call in that function) — the raw API response (IntakeCreated in
+    // client.ts) also carries `items`, but that field is deliberately dropped
+    // before it reaches the caller, so it does not belong in the contract here.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string' },
+        portal_url: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
+        follow_up: FOLLOW_UP_SCHEMA,
+        notices: {
+          type: 'array',
+          description: 'Cadence caveats, present only when chase_schedule="custom" makes them relevant.',
+          items: { type: 'string' },
+        },
+      },
+      required: ['intake_id', 'portal_url', 'status'],
+      additionalProperties: false,
+    },
   },
 
   {
@@ -709,6 +774,57 @@ This is also the call a scheduled check should make when no webhook is registere
         },
       },
       required: ['intake_id'],
+    },
+    // Mirrors IntakeStatusResult in client.ts, which callGetIntakeStatus
+    // returns unmodified.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
+        progress: {
+          type: 'object',
+          properties: {
+            submitted: { type: 'number' },
+            total: { type: 'number' },
+          },
+          required: ['submitted', 'total'],
+          additionalProperties: false,
+        },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
+              submitted_at: { type: 'string' },
+              label: { type: 'string' },
+            },
+            required: ['key', 'status', 'label'],
+            additionalProperties: false,
+          },
+        },
+        chases: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              channel: { type: 'string' },
+              sent_at: { type: 'string' },
+              status: { type: 'string' },
+              attempt_no: { type: 'number' },
+            },
+            required: ['channel', 'sent_at', 'status', 'attempt_no'],
+            additionalProperties: false,
+          },
+        },
+        client_last_seen: { type: 'string' },
+        due_date: { type: 'string' },
+        client_brief: { type: 'string', description: 'The brief shown to the client above the requested items, if one is set.' },
+      },
+      required: ['intake_id', 'status', 'progress', 'items', 'chases'],
+      additionalProperties: false,
     },
   },
 
@@ -754,6 +870,58 @@ For a DECISION (assignee=owner, type select/multiselect) results holds the answe
       },
       required: ['intake_id'],
     },
+    // Mirrors IntakeResults in client.ts. `results` and `meta` are genuinely
+    // dynamic-key maps — keyed by whatever item keys this particular intake
+    // defined, which vary per intake and per caller — so they are modeled as
+    // maps (additionalProperties) rather than enumerated properties. `results`
+    // values also vary in TYPE by item type (string, boolean, array, or a
+    // nested object for type=structured), so it stays fully open.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
+        results: {
+          type: 'object',
+          description: "Keyed by this intake's own item keys. A value's shape depends on that item's type.",
+          additionalProperties: true,
+        },
+        meta: {
+          type: 'object',
+          description: 'Keyed the same as results.',
+          additionalProperties: {
+            type: 'object',
+            properties: {
+              type: {
+                type: 'string',
+                enum: [
+                  'text', 'longtext', 'file', 'file_list', 'image',
+                  'color_list', 'select', 'multiselect', 'boolean', 'url', 'secret', 'structured',
+                ],
+              },
+              status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
+              submitted_at: { type: 'string' },
+              first_reveal: {
+                type: 'boolean',
+                description: 'Only present for type=secret: true on the call that reveals the plaintext value, false after.',
+              },
+              decided_by: {
+                type: 'string',
+                enum: ['owner', 'agent_proposal'],
+                description: 'Only present for an assignee=owner decision item.',
+              },
+            },
+            required: ['type', 'status'],
+            // Loose rather than false: the fields above are the ones this
+            // client's IntakeResults type documents, but the API is not
+            // contractually limited to exactly them.
+            additionalProperties: true,
+          },
+        },
+      },
+      required: ['intake_id', 'status', 'results', 'meta'],
+      additionalProperties: false,
+    },
   },
 
   {
@@ -792,6 +960,17 @@ Returns { status: "revision_requested", item_key }.`,
       },
       required: ['intake_id', 'item_key', 'note'],
     },
+    // Mirrors what requestRevision (client.ts) returns; the API's only status
+    // value for this route is "revision_requested".
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['revision_requested'] },
+        item_key: { type: 'string' },
+      },
+      required: ['status', 'item_key'],
+      additionalProperties: false,
+    },
   },
 
   {
@@ -825,6 +1004,13 @@ Returns { sent: true }.`,
         },
       },
       required: ['intake_id'],
+    },
+    // sendChase (client.ts) has exactly one success shape: { sent: true }.
+    outputSchema: {
+      type: 'object' as const,
+      properties: { sent: { type: 'boolean', enum: [true] } },
+      required: ['sent'],
+      additionalProperties: false,
     },
   },
 
@@ -877,6 +1063,33 @@ Returns { intakes: [...], total } where each intake includes intake_id, project_
         },
       },
       required: [],
+    },
+    // Mirrors IntakeList / IntakeListItem in client.ts.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        intakes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              intake_id: { type: 'string' },
+              project_name: { type: 'string' },
+              client_email: { type: 'string' },
+              status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
+              created_at: { type: 'string' },
+              due_date: { type: 'string' },
+              portal_url: { type: 'string' },
+              folder_id: { type: ['string', 'null'] },
+            },
+            required: ['intake_id', 'project_name', 'client_email', 'status', 'created_at', 'portal_url'],
+            additionalProperties: false,
+          },
+        },
+        total: { type: 'number' },
+      },
+      required: ['intakes', 'total'],
+      additionalProperties: false,
     },
   },
 
@@ -934,6 +1147,32 @@ Items must follow the same key/type/label rules as define_intake (snake_case key
       },
       required: ['intake_id', 'items'],
     },
+    // Mirrors IntakeCreated in client.ts, which callAddItems returns
+    // unmodified (unlike define_intake, which trims out `items`).
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        intake_id: { type: 'string' },
+        portal_url: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
+            },
+            required: ['key', 'status'],
+            additionalProperties: false,
+          },
+        },
+        follow_up: FOLLOW_UP_SCHEMA,
+        folder_id: { type: ['string', 'null'] },
+      },
+      required: ['intake_id', 'portal_url', 'status', 'items'],
+      additionalProperties: false,
+    },
   },
 
   {
@@ -982,6 +1221,18 @@ If the client has already answered and the change would make their answer invali
         },
       },
       required: ['intake_id', 'item_key'],
+    },
+    // updateItem (client.ts) types `item` as Record<string, unknown> — the API
+    // does not publish a fixed contract for the item object it echoes back —
+    // so only its presence as an object is asserted, not its exact fields.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        item: { type: 'object', additionalProperties: true },
+        discarded_submitted_value: { type: 'boolean' },
+      },
+      required: ['item'],
+      additionalProperties: false,
     },
   },
 
@@ -1084,6 +1335,15 @@ Fails if the intake is archived. At least one field must be given. Returns the f
       },
       required: ['intake_id'],
     },
+    // updateIntake (client.ts) types its return as Record<string, unknown> —
+    // "the full, updated intake object" per the description above, but this
+    // client does not otherwise give it a fixed shape — so only "it is a
+    // non-empty object" is asserted here, not its exact fields.
+    outputSchema: {
+      type: 'object' as const,
+      additionalProperties: true,
+      minProperties: 1,
+    },
   },
 
   {
@@ -1120,6 +1380,26 @@ Fails if the address is not on the intake, or — for reinstate — if it never 
         },
       },
       required: ['intake_id', 'action', 'email'],
+    },
+    // action="add"/"remove" pass through whatever addRecipient/removeRecipient
+    // (client.ts) return, both typed Record<string, unknown> — no fixed
+    // contract here. action="reinstate" has a real one (RecipientReinstated).
+    // anyOf lets a caller that validates strictly accept whichever branch the
+    // action it sent actually produces.
+    outputSchema: {
+      anyOf: [
+        { type: 'object' as const, additionalProperties: true },
+        {
+          type: 'object' as const,
+          properties: {
+            email: { type: 'string' },
+            bounced_at: { type: 'null' },
+            still_chasing: { type: 'boolean' },
+          },
+          required: ['email', 'bounced_at', 'still_chasing'],
+          additionalProperties: false,
+        },
+      ],
     },
   },
 
@@ -1183,6 +1463,50 @@ Events: intake.completed (all required items in — the one to act on), item.sub
       },
       required: ['action'],
     },
+    // Each action produces a different, fixed shape (WebhookEndpoint variants
+    // in client.ts) — anyOf lets a caller accept whichever one its action sent
+    // actually returns, rather than forcing a single lowest-common-denominator
+    // object.
+    outputSchema: {
+      anyOf: [
+        {
+          // action="create" — WebhookEndpoint & { secret }, plus the one-time
+          // reminder callManageWebhook adds to the object it stringifies.
+          type: 'object' as const,
+          properties: {
+            ...WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES,
+            secret: { type: 'string' },
+            note: { type: 'string' },
+          },
+          required: ['id', 'url', 'events', 'format', 'active', 'created_at', 'secret', 'note'],
+          additionalProperties: false,
+        },
+        {
+          // action="list"
+          type: 'object' as const,
+          properties: {
+            webhooks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES,
+                required: ['id', 'url', 'events', 'format', 'active', 'created_at'],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ['webhooks'],
+          additionalProperties: false,
+        },
+        {
+          // action="delete"
+          type: 'object' as const,
+          properties: { deleted: { type: 'boolean', enum: [true] } },
+          required: ['deleted'],
+          additionalProperties: false,
+        },
+      ],
+    },
   },
 
   {
@@ -1206,6 +1530,29 @@ Returns { folders: [{ id, name, sort_order, intake_count, created_at }] }.`,
       type: 'object' as const,
       properties: {},
       required: [],
+    },
+    // Mirrors FolderList / FolderSummary in client.ts.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        folders: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              sort_order: { type: 'number' },
+              intake_count: { type: 'number' },
+              created_at: { type: 'string' },
+            },
+            required: ['id', 'name', 'sort_order', 'intake_count', 'created_at'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['folders'],
+      additionalProperties: false,
     },
   },
 
@@ -1235,6 +1582,19 @@ Returns the created folder { id, name, sort_order, intake_count, created_at }.`,
         },
       },
       required: ['name'],
+    },
+    // Mirrors FolderSummary in client.ts.
+    outputSchema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string' },
+        name: { type: 'string' },
+        sort_order: { type: 'number' },
+        intake_count: { type: 'number' },
+        created_at: { type: 'string' },
+      },
+      required: ['id', 'name', 'sort_order', 'intake_count', 'created_at'],
+      additionalProperties: false,
     },
   },
 
@@ -1267,6 +1627,10 @@ Has no effect if a key is already supplied via the \`--api-key\` flag or the \`B
       type: 'object' as const,
       properties: {},
     },
+    // No outputSchema: callLogin's result.text is human prose ("Open <url> and
+    // confirm code ...", "Still waiting for approval", "Signed in as ..."),
+    // not JSON, and its shape depends on which of the two phases produced it.
+    // There is no stable field to constrain a client against.
   },
   {
     name: 'logout',
@@ -1284,6 +1648,9 @@ Has no effect if a key is already supplied via the \`--api-key\` flag or the \`B
       type: 'object' as const,
       properties: {},
     },
+    // No outputSchema, for the same reason as login: callLogout's result.text
+    // is prose ("Signed out.", a network-failure note pointing at the
+    // dashboard, ...), not a JSON value with a stable shape.
   },
 ];
 
@@ -1292,6 +1659,12 @@ Has no effect if a key is already supplied via the \`--api-key\` flag or the \`B
 export interface ToolResult {
   text: string;
   isError?: boolean;
+  // Same value as `text` (parsed), for a tool whose TOOLS entry declares an
+  // outputSchema. Only ever set on a success result — never populated
+  // alongside isError, and never for a tool that has no outputSchema (login,
+  // logout, and the branches of tools that skip it — see each entry's comment
+  // in TOOLS for why).
+  structuredContent?: Record<string, unknown>;
 }
 
 // ─── Idempotency key ──────────────────────────────────────────────────────────
@@ -1323,6 +1696,18 @@ function deriveIdempotencyKey(
 function validationError(issues: z.ZodIssue[]): ToolResult {
   const messages = issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
   return { text: `Validation error: ${messages}`, isError: true };
+}
+
+// Builds a ToolResult from a JSON-shaped value: the object is defined once and
+// backs both the human-readable `text` (stringified, for clients that only
+// read text) and `structuredContent` (the object itself, for clients that
+// validate against a tool's outputSchema) — so the two can never drift apart.
+// `value` is typed `object` rather than `Record<string, unknown>` because
+// several client.ts return types (IntakeStatusResult, IntakeResults, ...) are
+// interfaces without an index signature, which TypeScript does not consider
+// assignable to Record<string, unknown> even though every field is present.
+function jsonResult(value: object): ToolResult {
+  return { text: JSON.stringify(value, null, 2), structuredContent: value as Record<string, unknown> };
 }
 
 // ─── Execute functions ────────────────────────────────────────────────────────
@@ -1392,23 +1777,17 @@ export async function callDefineIntake(
 
   const notices = cadenceNotices(parsed.data);
 
-  return {
-    text: JSON.stringify(
-      {
-        intake_id: result.intake_id,
-        portal_url: result.portal_url,
-        status: result.status,
-        // Passed through rather than dropped: the tool description tells the
-        // caller to act on this, and picking fields by hand here is what made
-        // it invisible in 0.5.0 — the advice existed on the wire and never
-        // reached the agent it was written for.
-        ...(result.follow_up ? { follow_up: result.follow_up } : {}),
-        ...(notices.length > 0 ? { notices } : {}),
-      },
-      null,
-      2,
-    ),
-  };
+  return jsonResult({
+    intake_id: result.intake_id,
+    portal_url: result.portal_url,
+    status: result.status,
+    // Passed through rather than dropped: the tool description tells the
+    // caller to act on this, and picking fields by hand here is what made
+    // it invisible in 0.5.0 — the advice existed on the wire and never
+    // reached the agent it was written for.
+    ...(result.follow_up ? { follow_up: result.follow_up } : {}),
+    ...(notices.length > 0 ? { notices } : {}),
+  });
 }
 
 export async function callGetIntakeStatus(
@@ -1419,7 +1798,7 @@ export async function callGetIntakeStatus(
   if (!parsed.success) return validationError(parsed.error.issues);
 
   const result = await getIntakeStatus(config, parsed.data.intake_id);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callGetIntakeResults(
@@ -1440,7 +1819,7 @@ export async function callGetIntakeResults(
     only_new: only_new ?? false,
     include_pending: include_pending ?? false,
   });
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callRequestRevision(
@@ -1462,7 +1841,7 @@ export async function callRequestRevision(
     parsed.data.item_key,
     parsed.data.note,
   );
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callSendChase(
@@ -1481,7 +1860,7 @@ export async function callSendChase(
   if (!parsed.success) return validationError(parsed.error.issues);
 
   const result = await sendChase(config, parsed.data.intake_id, parsed.data.channel);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callListIntakes(
@@ -1503,7 +1882,7 @@ export async function callListIntakes(
   if (!parsed.success) return validationError(parsed.error.issues);
 
   const result = await listIntakes(config, parsed.data);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callAddItems(
@@ -1519,7 +1898,7 @@ export async function callAddItems(
   if (!parsed.success) return validationError(parsed.error.issues);
 
   const result = await addItems(config, parsed.data.intake_id, parsed.data.items);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callUpdateItem(
@@ -1531,7 +1910,7 @@ export async function callUpdateItem(
 
   const { intake_id, item_key, ...changes } = parsed.data;
   const result = await updateItem(config, intake_id, item_key, changes);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callUpdateIntake(
@@ -1543,7 +1922,7 @@ export async function callUpdateIntake(
 
   const { intake_id, ...changes } = parsed.data;
   const result = await updateIntake(config, intake_id, changes);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callManageRecipients(
@@ -1556,14 +1935,14 @@ export async function callManageRecipients(
 
   if (action === 'add') {
     const result = await addRecipient(config, intake_id, { email, ...(name !== undefined && { name }) });
-    return { text: JSON.stringify(result, null, 2) };
+    return jsonResult(result);
   }
   if (action === 'remove') {
     const result = await removeRecipient(config, intake_id, email);
-    return { text: JSON.stringify(result, null, 2) };
+    return jsonResult(result);
   }
   const result = await reinstateRecipient(config, intake_id, email);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
@@ -1605,26 +1984,20 @@ export async function callManageWebhook(
       return { text: 'manage_webhook action="create" needs both `url` and `events`.', isError: true };
     }
     const created = await createWebhook(config, { url, events, ...(format ? { format } : {}) });
-    return {
-      text: JSON.stringify(
-        {
-          ...created,
-          note: 'Store `secret` now — it verifies every delivery signature and is returned only on creation.',
-        },
-        null,
-        2,
-      ),
-    };
+    return jsonResult({
+      ...created,
+      note: 'Store `secret` now — it verifies every delivery signature and is returned only on creation.',
+    });
   }
 
   if (action === 'delete') {
     if (!webhookId) {
       return { text: 'manage_webhook action="delete" needs `webhook_id`.', isError: true };
     }
-    return { text: JSON.stringify(await deleteWebhook(config, webhookId), null, 2) };
+    return jsonResult(await deleteWebhook(config, webhookId));
   }
 
-  return { text: JSON.stringify(await listWebhooks(config), null, 2) };
+  return jsonResult(await listWebhooks(config));
 }
 
 // ─── folders ────────────────────────────────────────────────────────────────
@@ -1634,7 +2007,7 @@ export async function callListFolders(
   _args: unknown,
 ): Promise<ToolResult> {
   const result = await listFolders(config);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 export async function callCreateFolder(
@@ -1645,7 +2018,7 @@ export async function callCreateFolder(
   if (!parsed.success) return validationError(parsed.error.issues);
 
   const result = await createFolder(config, parsed.data.name);
-  return { text: JSON.stringify(result, null, 2) };
+  return jsonResult(result);
 }
 
 // ─── login / logout ────────────────────────────────────────────────────────

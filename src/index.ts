@@ -240,6 +240,7 @@ Normal flow: call define_intake with the items you need, tell the user it was se
         const result = await executeTool(name, cfg, args, { clientName: server.getClientVersion()?.name });
         return {
           content: [{ type: 'text' as const, text: result.text }],
+          ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
           ...(result.isError ? { isError: true } : {}),
         };
       }
@@ -263,6 +264,7 @@ Normal flow: call define_intake with the items you need, tell the user it was se
         if (result.isError) opts.onToolError?.(result.text);
         return {
           content: [{ type: 'text' as const, text: result.text }],
+          ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
           ...(result.isError ? { isError: true } : {}),
         };
       } catch (err) {
