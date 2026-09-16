@@ -1645,3 +1645,14 @@ describe('structuredContent matches outputSchema', () => {
     expectStructuredContentValid('create_folder', result.structuredContent);
   });
 });
+
+describe('outputSchema root', () => {
+  // MCP requires outputSchema to be an object schema at the root. Glama's
+  // health check rejected all of tools/list when two tools had a bare anyOf.
+  it.each(TOOLS.filter((t) => 'outputSchema' in t && t.outputSchema).map((t) => [t.name, t]))(
+    '%s declares type "object" at the root',
+    (_name, tool) => {
+      expect((tool as { outputSchema: { type?: string } }).outputSchema.type).toBe('object');
+    },
+  );
+});

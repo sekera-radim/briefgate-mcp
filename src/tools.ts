@@ -1387,6 +1387,9 @@ Fails if the address is not on the intake, or — for reinstate — if it never 
     // anyOf lets a caller that validates strictly accept whichever branch the
     // action it sent actually produces.
     outputSchema: {
+      // MCP requires an object at the root of outputSchema; strict clients
+      // (Glama's health check) reject the whole tools/list otherwise.
+      type: 'object' as const,
       anyOf: [
         { type: 'object' as const, additionalProperties: true },
         {
@@ -1468,6 +1471,7 @@ Events: intake.completed (all required items in — the one to act on), item.sub
     // actually returns, rather than forcing a single lowest-common-denominator
     // object.
     outputSchema: {
+      type: 'object' as const,
       anyOf: [
         {
           // action="create" — WebhookEndpoint & { secret }, plus the one-time
