@@ -72,11 +72,44 @@ codex mcp add briefgate --env BRIEFGATE_API_KEY=bg_live_xxxxx -- npx -y @briefga
 gemini extensions install https://github.com/sekera-radim/briefgate-mcp
 ```
 
-It authenticates the same way as the other hosted clients above — via OAuth, on first use.
+It authenticates the same way as the other hosted clients above — via OAuth, on first use. The extension also ships [`GEMINI.md`](GEMINI.md), a context file that tells the model what BriefGate is and when to reach for it.
 
 **Claude Desktop** — one-click install as a [Desktop Extension](https://www.anthropic.com/engineering/desktop-extensions) (`.mcpb`), running the local `@briefgate/mcp` package instead of the hosted endpoint. Build details: see [MCPB bundle](#mcpb-bundle-claude-desktop-extension) below.
 
+**Cursor** — as a [plugin](https://cursor.com/docs/plugins) from this repo's [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json), which bundles the same MCP config together with the `collect-from-client` skill below.
+
+**Any [Agent Skills](https://agentskills.io)-compatible tool** (OpenAI Codex, GitHub Copilot / VS Code, Cursor, Gemini CLI, and other clients on that standard) — install the [`collect-from-client`](skills/collect-from-client/SKILL.md) skill with the [`skills` CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add sekera-radim/briefgate-mcp
+```
+
+This copies `SKILL.md` into that tool's local skills directory; the skill still assumes the `briefgate` MCP server (see the client-specific instructions above) is configured separately.
+
 Full setup details, manual config, and API-key precedence: see [Reference](#reference) below.
+
+### For agents reading project instructions (AGENTS.md, Copilot, Cursor rules)
+
+If your agent reads a project instructions file instead of (or in addition to) MCP tool descriptions or Agent Skills, add this block to your `AGENTS.md`, `.github/copilot-instructions.md`, or `.cursor/rules`:
+
+```markdown
+## BriefGate
+
+BriefGate (MCP server `briefgate`, or `npx @briefgate/mcp`) collects files,
+text, choices, or credentials from a human who is not in this conversation
+(a client, colleague, or customer) — it emails them a no-account portal link
+and chases them automatically until everything is submitted.
+
+Use it when a task is blocked on input only that outside person can supply,
+especially if they may take days and need reminders. Do not use it when the
+information is already available, or when the person who should answer is
+the user you're talking to.
+
+Flow: `define_intake` (with items) -> tell the user it was sent ->
+`get_intake_status` later ("not ready" is normal, not an error) ->
+`get_intake_results` once completed. `request_revision` for a bad item.
+Secret items are revealed in plaintext exactly once.
+```
 
 ## Example: building a client's website
 

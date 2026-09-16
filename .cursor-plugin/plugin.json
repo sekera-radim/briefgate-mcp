@@ -1,11 +1,9 @@
 {
   "name": "briefgate",
-  "version": "0.9.0",
   "description": "Client intake for AI agents: request files, texts and credentials from a client, chase automatically, get notified when complete.",
-  "contextFileName": "GEMINI.md",
-  "mcpServers": {
-    "briefgate": {
-      "httpUrl": "https://mcp.briefgate.dev/mcp"
-    }
-  }
+  "version": "0.9.0",
+  "author": {
+    "name": "Radim Sekera"
+  },
+  "mcpServers": ".mcp.json"
 }
