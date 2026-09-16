@@ -21,6 +21,9 @@ try {
   console.log('2/4 Staging production-only package ...');
   cpSync(join(repoRoot, 'dist'), join(staging, 'dist'), { recursive: true });
   cpSync(join(repoRoot, 'manifest.json'), join(staging, 'manifest.json'));
+  // The manifest points at icon.png; `mcpb pack` validates it inside the
+  // staging copy, so the icon has to travel with it or packing fails.
+  cpSync(join(repoRoot, 'icon.png'), join(staging, 'icon.png'));
   cpSync(join(repoRoot, 'README.md'), join(staging, 'README.md'));
   cpSync(join(repoRoot, 'LICENSE'), join(staging, 'LICENSE'));
 
