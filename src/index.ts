@@ -215,7 +215,13 @@ Normal flow: call define_intake with the items you need, tell the user it was se
       { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+    // The hosted endpoint signs in through OAuth, so login/logout would only
+    // show up in directory scans and client tool lists as tools that always
+    // fail there.
+    const listedTools = opts.isPublicHost
+      ? TOOLS.filter((tool) => tool.name !== 'login' && tool.name !== 'logout')
+      : TOOLS;
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listedTools }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: rawArgs } = request.params;

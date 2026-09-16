@@ -171,8 +171,10 @@ describe('published mode (BRIEFGATE_MCP_PUBLIC_HOST set)', () => {
     });
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain('"login"');
-    expect(text).toContain('"logout"');
+    expect(text).toContain('"define_intake"');
+    // OAuth handles sign-in here, so the local-only helpers are not listed.
+    expect(text).not.toContain('"name":"login"');
+    expect(text).not.toContain('"name":"logout"');
   });
 
   it('refuses login/logout with a clear message instead of running the device flow', async () => {
@@ -240,6 +242,9 @@ describe('local mode (no BRIEFGATE_MCP_PUBLIC_HOST) is unchanged', () => {
   it('still answers tools/list with no Authorization header at all', async () => {
     const res = await rpc(baseUrl, toolsListRequest);
     expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('"name":"login"');
+    expect(text).toContain('"name":"logout"');
   });
 
   it('still answers initialize with no Authorization header', async () => {

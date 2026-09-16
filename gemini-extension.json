@@ -1,6 +1,6 @@
 {
   "name": "briefgate",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Client intake for AI agents: request files, texts and credentials from a client, chase automatically, get notified when complete.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {
