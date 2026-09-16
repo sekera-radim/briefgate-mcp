@@ -66,6 +66,14 @@ Then run `npx -y @briefgate/mcp login`, or ask the agent to call the `login` too
 codex mcp add briefgate --env BRIEFGATE_API_KEY=bg_live_xxxxx -- npx -y @briefgate/mcp
 ```
 
+**Gemini CLI** — installs as an extension from this repo's [`gemini-extension.json`](gemini-extension.json), pointed at the hosted endpoint:
+
+```bash
+gemini extensions install https://github.com/sekera-radim/briefgate-mcp
+```
+
+It authenticates the same way as the other hosted clients above — via OAuth, on first use.
+
 Full setup details, manual config, and API-key precedence: see [Reference](#reference) below.
 
 ## Example: building a client's website
