@@ -399,8 +399,6 @@ const FOLLOW_UP_SCHEMA = {
         events: { type: 'array', items: { type: 'string' } },
         register_with: { type: 'string' },
       },
-      required: ['active_endpoints', 'events', 'register_with'],
-      additionalProperties: false,
     },
     schedule: {
       type: 'object',
@@ -409,12 +407,8 @@ const FOLLOW_UP_SCHEMA = {
         every_hours: { type: 'number' },
         until: { type: 'string' },
       },
-      required: ['check_with', 'every_hours', 'until'],
-      additionalProperties: false,
     },
   },
-  required: ['recommended', 'reason', 'webhook', 'schedule'],
-  additionalProperties: false,
 };
 
 const WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES = {
@@ -426,6 +420,11 @@ const WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES = {
   created_at: { type: 'string' },
 } as const;
 
+// Output schemas describe the documented shape of each result without closing
+// it: no additionalProperties: false, nullable timestamps, and no required
+// fields on write tools. Strict MCP clients validate structuredContent against
+// outputSchema and reject the whole call on a mismatch, and the API adds fields
+// over time — a closed schema turned every such addition into a broken tool.
 export const TOOLS = [
   {
     name: 'define_intake',
@@ -743,8 +742,6 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
           items: { type: 'string' },
         },
       },
-      required: ['intake_id', 'portal_url', 'status'],
-      additionalProperties: false,
     },
   },
 
@@ -789,7 +786,6 @@ This is also the call a scheduled check should make when no webhook is registere
             total: { type: 'number' },
           },
           required: ['submitted', 'total'],
-          additionalProperties: false,
         },
         items: {
           type: 'array',
@@ -798,11 +794,10 @@ This is also the call a scheduled check should make when no webhook is registere
             properties: {
               key: { type: 'string' },
               status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
-              submitted_at: { type: 'string' },
+              submitted_at: { type: ['string', 'null'] },
               label: { type: 'string' },
             },
             required: ['key', 'status', 'label'],
-            additionalProperties: false,
           },
         },
         chases: {
@@ -811,20 +806,18 @@ This is also the call a scheduled check should make when no webhook is registere
             type: 'object',
             properties: {
               channel: { type: 'string' },
-              sent_at: { type: 'string' },
+              sent_at: { type: ['string', 'null'] },
               status: { type: 'string' },
               attempt_no: { type: 'number' },
             },
-            required: ['channel', 'sent_at', 'status', 'attempt_no'],
-            additionalProperties: false,
+            required: ['channel', 'status', 'attempt_no'],
           },
         },
-        client_last_seen: { type: 'string' },
-        due_date: { type: 'string' },
+        client_last_seen: { type: ['string', 'null'] },
+        due_date: { type: ['string', 'null'] },
         client_brief: { type: 'string', description: 'The brief shown to the client above the requested items, if one is set.' },
       },
-      required: ['intake_id', 'status', 'progress', 'items', 'chases'],
-      additionalProperties: false,
+      required: ['status', 'progress', 'items', 'chases'],
     },
   },
 
@@ -900,7 +893,7 @@ For a DECISION (assignee=owner, type select/multiselect) results holds the answe
                 ],
               },
               status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
-              submitted_at: { type: 'string' },
+              submitted_at: { type: ['string', 'null'] },
               first_reveal: {
                 type: 'boolean',
                 description: 'Only present for type=secret: true on the call that reveals the plaintext value, false after.',
@@ -920,7 +913,6 @@ For a DECISION (assignee=owner, type select/multiselect) results holds the answe
         },
       },
       required: ['intake_id', 'status', 'results', 'meta'],
-      additionalProperties: false,
     },
   },
 
@@ -968,8 +960,6 @@ Returns { status: "revision_requested", item_key }.`,
         status: { type: 'string', enum: ['revision_requested'] },
         item_key: { type: 'string' },
       },
-      required: ['status', 'item_key'],
-      additionalProperties: false,
     },
   },
 
@@ -1009,8 +999,6 @@ Returns { sent: true }.`,
     outputSchema: {
       type: 'object' as const,
       properties: { sent: { type: 'boolean', enum: [true] } },
-      required: ['sent'],
-      additionalProperties: false,
     },
   },
 
@@ -1077,19 +1065,17 @@ Returns { intakes: [...], total } where each intake includes intake_id, project_
               project_name: { type: 'string' },
               client_email: { type: 'string' },
               status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
-              created_at: { type: 'string' },
-              due_date: { type: 'string' },
+              created_at: { type: ['string', 'null'] },
+              due_date: { type: ['string', 'null'] },
               portal_url: { type: 'string' },
               folder_id: { type: ['string', 'null'] },
             },
-            required: ['intake_id', 'project_name', 'client_email', 'status', 'created_at', 'portal_url'],
-            additionalProperties: false,
+            required: ['intake_id', 'project_name', 'status', 'created_at', 'portal_url'],
           },
         },
         total: { type: 'number' },
       },
       required: ['intakes', 'total'],
-      additionalProperties: false,
     },
   },
 
@@ -1163,15 +1149,11 @@ Items must follow the same key/type/label rules as define_intake (snake_case key
               key: { type: 'string' },
               status: { type: 'string', enum: ['pending', 'submitted', 'needs_revision', 'approved'] },
             },
-            required: ['key', 'status'],
-            additionalProperties: false,
           },
         },
         follow_up: FOLLOW_UP_SCHEMA,
         folder_id: { type: ['string', 'null'] },
       },
-      required: ['intake_id', 'portal_url', 'status', 'items'],
-      additionalProperties: false,
     },
   },
 
@@ -1231,8 +1213,6 @@ If the client has already answered and the change would make their answer invali
         item: { type: 'object', additionalProperties: true },
         discarded_submitted_value: { type: 'boolean' },
       },
-      required: ['item'],
-      additionalProperties: false,
     },
   },
 
@@ -1399,8 +1379,6 @@ Fails if the address is not on the intake, or — for reinstate — if it never 
             bounced_at: { type: 'null' },
             still_chasing: { type: 'boolean' },
           },
-          required: ['email', 'bounced_at', 'still_chasing'],
-          additionalProperties: false,
         },
       ],
     },
@@ -1482,8 +1460,6 @@ Events: intake.completed (all required items in — the one to act on), item.sub
             secret: { type: 'string' },
             note: { type: 'string' },
           },
-          required: ['id', 'url', 'events', 'format', 'active', 'created_at', 'secret', 'note'],
-          additionalProperties: false,
         },
         {
           // action="list"
@@ -1494,20 +1470,14 @@ Events: intake.completed (all required items in — the one to act on), item.sub
               items: {
                 type: 'object',
                 properties: WEBHOOK_ENDPOINT_SCHEMA_PROPERTIES,
-                required: ['id', 'url', 'events', 'format', 'active', 'created_at'],
-                additionalProperties: false,
               },
             },
           },
-          required: ['webhooks'],
-          additionalProperties: false,
         },
         {
           // action="delete"
           type: 'object' as const,
           properties: { deleted: { type: 'boolean', enum: [true] } },
-          required: ['deleted'],
-          additionalProperties: false,
         },
       ],
     },
@@ -1548,15 +1518,13 @@ Returns { folders: [{ id, name, sort_order, intake_count, created_at }] }.`,
               name: { type: 'string' },
               sort_order: { type: 'number' },
               intake_count: { type: 'number' },
-              created_at: { type: 'string' },
+              created_at: { type: ['string', 'null'] },
             },
             required: ['id', 'name', 'sort_order', 'intake_count', 'created_at'],
-            additionalProperties: false,
           },
         },
       },
       required: ['folders'],
-      additionalProperties: false,
     },
   },
 
@@ -1595,10 +1563,8 @@ Returns the created folder { id, name, sort_order, intake_count, created_at }.`,
         name: { type: 'string' },
         sort_order: { type: 'number' },
         intake_count: { type: 'number' },
-        created_at: { type: 'string' },
+        created_at: { type: ['string', 'null'] },
       },
-      required: ['id', 'name', 'sort_order', 'intake_count', 'created_at'],
-      additionalProperties: false,
     },
   },
 

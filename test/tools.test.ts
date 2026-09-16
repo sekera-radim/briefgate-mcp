@@ -1656,3 +1656,21 @@ describe('outputSchema root', () => {
     },
   );
 });
+
+describe('outputSchema openness', () => {
+  // A closed schema rejects any field the API adds later, and strict MCP
+  // clients then fail the whole tool call (live get_intake_status once
+  // returned fields its schema forbade).
+  const findClosed = (node: unknown, path: string): string[] => {
+    if (!node || typeof node !== 'object') return [];
+    const record = node as Record<string, unknown>;
+    const here = record['additionalProperties'] === false ? [path] : [];
+    return here.concat(Object.entries(record).flatMap(([k, v]) => findClosed(v, `${path}/${k}`)));
+  };
+  it.each(TOOLS.filter((t) => 'outputSchema' in t && t.outputSchema).map((t) => [t.name, t]))(
+    '%s never sets additionalProperties: false',
+    (_name, tool) => {
+      expect(findClosed((tool as { outputSchema: unknown }).outputSchema, '')).toEqual([]);
+    },
+  );
+});
