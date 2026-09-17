@@ -1,5 +1,7 @@
 # BriefGate
 
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/sekera-radim/briefgate-mcp)
+
 **Client intake for AI coding agents.**
 
 Your agent can build the website.
