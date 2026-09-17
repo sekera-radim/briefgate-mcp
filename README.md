@@ -74,6 +74,8 @@ gemini extensions install https://github.com/sekera-radim/briefgate-mcp
 
 It authenticates the same way as the other hosted clients above — via OAuth, on first use. The extension also ships [`GEMINI.md`](GEMINI.md), a context file that tells the model what BriefGate is and when to reach for it.
 
+By default `gemini extensions install` fetches the repo's latest GitHub Release rather than the `main` branch; if that release predates the current `gemini-extension.json` and the command reports a missing configuration file, install from `main` directly instead: `gemini extensions install --ref main https://github.com/sekera-radim/briefgate-mcp`.
+
 **Claude Desktop** — one-click install as a [Desktop Extension](https://www.anthropic.com/engineering/desktop-extensions) (`.mcpb`), running the local `@briefgate/mcp` package instead of the hosted endpoint. Build details: see [MCPB bundle](#mcpb-bundle-claude-desktop-extension) below.
 
 **Cursor** — as a [plugin](https://cursor.com/docs/plugins) from this repo's [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json), which bundles the same MCP config together with the `collect-from-client` skill below.

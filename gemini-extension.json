@@ -5,7 +5,8 @@
   "contextFileName": "GEMINI.md",
   "mcpServers": {
     "briefgate": {
-      "httpUrl": "https://mcp.briefgate.dev/mcp"
+      "url": "https://mcp.briefgate.dev/mcp",
+      "type": "http"
     }
   }
 }
