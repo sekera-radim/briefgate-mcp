@@ -1,8 +1,8 @@
 {
   "name": "@briefgate/mcp",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "mcpName": "io.github.sekera-radim/briefgate",
-  "description": "Client intake for AI coding agents — MCP server: your agent asks the client for logos, copy and credentials, and BriefGate chases them until they arrive.",
+  "description": "Client intake: collect logos, copy, logins and structured data from clients. Build the request in the browser dashboard — no agent needed — or let your AI coding agent build it over MCP.",
   "keywords": [
     "mcp",
     "briefgate",
@@ -10,7 +10,11 @@
     "onboarding",
     "ai-agent",
     "claude-code",
-    "freelance"
+    "freelance",
+    "client-portal",
+    "file-collection",
+    "dashboard",
+    "no-code"
   ],
   "license": "MIT",
   "author": "Radim Sekera",

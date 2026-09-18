@@ -2,10 +2,16 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/sekera-radim/briefgate-mcp)
 
-**Client intake for AI coding agents.**
+**Client intake — from your browser, or from your AI coding agent.**
 
 Your agent can build the website.
 BriefGate gets the missing things from the client.
+
+**No agent? You don't need one.** Everything below can be done by hand at
+[app.briefgate.dev](https://app.briefgate.dev/app): build the request, send the
+link, watch answers arrive, download the results as one ZIP — no code, no API
+key, no MCP client. This package is for the other way of working, where an agent
+does it for you. See the [dashboard quickstart](https://briefgate.dev/docs/dashboard-quickstart).
 
 ```
 Claude Code / Cursor / Codex → BriefGate → Client portal
@@ -17,8 +23,6 @@ Claude Code / Cursor / Codex → BriefGate → Client portal
 [Watch as MP4 (25 s)](https://briefgate.dev/assets/demo/killer-demo.mp4) · [Full 47 s walkthrough](https://briefgate.dev/assets/demo/briefgate-demo.mp4)
 
 [Website](https://briefgate.dev?utm_source=github&utm_medium=readme&utm_campaign=mcp_launch) · [MCP reference](https://briefgate.dev/docs/mcp) · [llms.txt](https://briefgate.dev/llms.txt) · [Guides and checklists](https://briefgate.dev/guides)
-
-Not working with an agent? The same intakes can be created from the browser dashboard — see the [dashboard quickstart](https://briefgate.dev/docs/dashboard-quickstart).
 
 ## The problem
 
