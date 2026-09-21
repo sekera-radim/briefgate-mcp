@@ -1,6 +1,7 @@
 # BriefGate
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/sekera-radim/briefgate-mcp)
+[![M8ven Score](https://m8ven.ai/badge/mcp/sekera-radim-briefgate-mcp-tsj0u1?v=64659e9b97f5769f57b6d45e473d704e)](https://m8ven.ai/mcp/sekera-radim-briefgate-mcp-tsj0u1)
 
 **Client intake — from your browser, or from your AI coding agent.**
 
