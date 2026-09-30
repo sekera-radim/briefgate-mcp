@@ -1,6 +1,6 @@
 {
   "name": "@briefgate/mcp",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "mcpName": "io.github.sekera-radim/briefgate",
   "description": "Client intake: collect logos, copy, logins and structured data from clients. Build the request in the browser dashboard — no agent needed — or let your AI coding agent build it over MCP.",
   "keywords": [

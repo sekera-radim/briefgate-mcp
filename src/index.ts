@@ -202,7 +202,7 @@ if (!cliSubcommand) {
 
 Use it when the task is blocked on input only that outside person can provide, especially when they may take days and need reminders. Do NOT use it when the needed information is already available to you, or when the user in THIS conversation can simply answer.
 
-Normal flow: call define_intake with the items you need, tell the user it was sent, then check back later with get_intake_status — "not ready" is a normal state, not an error. Once status is "completed", call get_intake_results to retrieve values. Use request_revision if a submitted item is unusable. Secret-type items (passwords, API keys) are included only in the first get_intake_results response and cannot be shown again, so make sure the user is ready to receive them.`;
+Normal flow: call define_intake with the items you need, tell the user it was sent, then check back later with get_intake_status — "not ready" is a normal state, not an error. Completion is not pushed: if define_intake returns follow_up.recommended = "schedule", offer the user a recurring get_intake_status check at the cadence in follow_up.schedule. Once status is "completed", call get_intake_results to retrieve values. Use request_revision if a submitted item is unusable. Secret-type items (passwords, API keys) are included only in the first get_intake_results response and cannot be shown again, so make sure the user is ready to receive them.`;
 
   // Returns a fresh Server instance bound to one caller's config.
   //

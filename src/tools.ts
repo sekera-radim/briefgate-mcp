@@ -442,10 +442,10 @@ export const TOOLS = [
 
 Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status, follow_up }. Save intake_id — you need it for all follow-up calls.
 
-AFTER CREATING AN INTAKE, SET UP HOW YOU WILL LEARN IT IS DONE. Nothing pushes to you on its own: MCP is request/response, so the server cannot wake you when the client finishes. Creating the intake and never checking again is the common failure — the completed work then sits in the portal until a human happens to look. The returned follow_up block tells you which of the two mechanisms applies:
+The server cannot notify this conversation when the client finishes (MCP is request/response), so the returned follow_up block describes how completion will be learned:
 
-- follow_up.recommended = "webhook" — the account already has an endpoint; deliveries will arrive there and you need do nothing further.
-- follow_up.recommended = "schedule" — no endpoint is registered. If you control a service that can receive public HTTPS, register one with manage_webhook. Otherwise tell the user to set up a recurring check (cron, a systemd timer, a scheduled task in their agent host) that calls get_intake_status every follow_up.schedule.every_hours hours until follow_up.schedule.until, and offer to configure it for them.
+- follow_up.recommended = "webhook" — the account has an active webhook endpoint; completion events are delivered there.
+- follow_up.recommended = "schedule" — no endpoint is registered. follow_up.schedule gives the cadence for checking with get_intake_status (every_hours) and the date to stop (until). An account that runs a public HTTPS service can register an endpoint with manage_webhook instead.
 
 Example:
 {
@@ -1396,9 +1396,9 @@ Fails if the address is not on the intake, or — for reinstate — if it never 
       // Every tool here reaches the BriefGate API over the network.
       openWorldHint: true,
     },
-    description: `Register, list, or remove a webhook endpoint so BriefGate pushes intake events to your service instead of you polling for them.
+    description: `Register, list, or remove a webhook endpoint: a public HTTPS URL on the user's own service that BriefGate POSTs intake events to, as an alternative to polling get_intake_status. Webhook reference: https://briefgate.dev/docs/webhooks
 
-Use this ONLY if you control a service that can receive public HTTPS requests. An agent running in a terminal cannot — for that case do not register anything and check on a schedule with get_intake_status instead. A registered endpoint that cannot receive produces failing deliveries and a false impression that the work is being watched.
+The endpoint must be reachable from the internet over HTTPS. A URL that cannot receive (for example a process that runs only in a local terminal) produces failing deliveries while the intake looks watched, so without such a service polling get_intake_status is the working option.
 
 action="create" returns a signing "secret" exactly once. The receiving service needs it to verify the signature on every delivery (verifyWebhookSignature from @briefgate/mcp/webhook), and it cannot be shown again. If it is ever exposed, there is no rotation in place — delete the endpoint and create a new one, which issues a fresh secret.
 

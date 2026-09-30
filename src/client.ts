@@ -167,9 +167,9 @@ export async function apiRequest<T>(
   body?: unknown,
   extraHeaders?: Record<string, string>,
   // Per-call replacement text for a status code, used where the generic
-  // wording below (written for the intake-level routes: a missing intake, a
-  // duplicate idempotency key) would misdescribe what actually went wrong on
-  // a route with different 4xx semantics, e.g. reinstating a recipient.
+  // wording below (written for the intake-level routes: a missing intake)
+  // would misdescribe what actually went wrong on a route with different 4xx
+  // semantics, e.g. reinstating a recipient.
   statusOverrides?: Partial<Record<number, string>>,
 ): Promise<T> {
   const url = `${config.baseUrl}/v1${path}`;
@@ -265,9 +265,12 @@ async function throwApiError(
       throw new Error(
         'Resource not found — verify the intake_id is correct and belongs to this API key.',
       );
+    // A 409 means different things per route (an item that isn't submitted
+    // yet, an archived intake, a duplicate folder), and the API's message names
+    // which one. createIntake overrides this with its idempotency-key wording.
     case 409:
       throw new Error(
-        'Conflict — an intake with this idempotency key already exists; check list_intakes to find it.',
+        `Conflict: ${message || 'the request conflicts with the current state of this resource.'}`,
       );
     case 410:
       throw new Error(
@@ -305,9 +308,16 @@ export async function createIntake(
   payload: unknown,
   idempotencyKey: string,
 ): Promise<IntakeCreated> {
-  return apiRequest<IntakeCreated>(config, 'POST', '/intakes', payload, {
-    'Idempotency-Key': idempotencyKey,
-  });
+  return apiRequest<IntakeCreated>(
+    config,
+    'POST',
+    '/intakes',
+    payload,
+    { 'Idempotency-Key': idempotencyKey },
+    {
+      409: 'Conflict — an intake with this idempotency key already exists; check list_intakes to find it.',
+    },
+  );
 }
 
 export async function listIntakes(
@@ -374,8 +384,8 @@ export async function updateIntake(
   changes: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return apiRequest(config, 'PATCH', `/intakes/${intakeId}`, changes, undefined, {
-    // The generic 409 text is written for intake creation (a duplicate
-    // idempotency key); this route's only 409 is an archived intake.
+    // This route's only 409 is an archived intake; say so in words an agent
+    // can act on rather than relaying the API's wording.
     409: 'This intake is archived and its settings can no longer be changed.',
   });
 }
@@ -420,10 +430,9 @@ export async function reinstateRecipient(
     undefined,
     undefined,
     {
-      // The generic 404/409 text is written for the intake-level routes
-      // (missing intake_id, duplicate idempotency key) and would mislead
-      // here — the intake exists either way; it's this one address that's
-      // wrong.
+      // The generic 404 text is written for the intake-level routes (a
+      // missing intake_id) and would mislead here — the intake exists either
+      // way; it's this one address that's wrong. Same for the 409.
       404: `No recipient "${email}" on this intake — check the address, e.g. with get_intake_status.`,
       409: `"${email}" has not bounced — nothing to reinstate.`,
     },
@@ -509,8 +518,8 @@ export async function createFolder(
   name: string,
 ): Promise<FolderSummary> {
   return apiRequest<FolderSummary>(config, 'POST', '/folders', { name }, undefined, {
-    // The generic 409 text is written for intake creation (a duplicate
-    // idempotency key) and would misdescribe this route's only 409.
+    // This route's only 409 is a duplicate name; point at the tool that
+    // finds the existing folder.
     409: `A folder named "${name}" already exists — use list_folders to find it.`,
   });
 }

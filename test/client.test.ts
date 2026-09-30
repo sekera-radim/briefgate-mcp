@@ -107,11 +107,34 @@ describe('error mapping', () => {
     await expect(getIntakeStatus(config, 'in_missing')).rejects.toThrow(/not found/);
   });
 
-  it('409 → conflict with idempotency key', async () => {
+  it('409 → conflict with the server message', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse(409, { message: 'Intake is archived.' }),
+    );
+    await expect(apiRequest(config, 'POST', '/intakes/in_1/items', {})).rejects.toThrow(
+      'Conflict: Intake is archived.',
+    );
+  });
+
+  it('409 on createIntake → idempotency key already used', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse(409, { message: 'Conflict' }));
-    await expect(apiRequest(config, 'POST', '/intakes', {})).rejects.toThrow(
+    await expect(createIntake(config, {}, 'key-1')).rejects.toThrow(
       /idempotency key already exists/,
     );
+  });
+
+  // Regression: request_revision on an item the client hasn't submitted used
+  // to surface the idempotency-key text, which named the wrong problem.
+  it('409 on requestRevision → why the item cannot be revised', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse(409, {
+        message:
+          'Item "logo" has status "pending". Only submitted or approved items can be sent back for revision.',
+      }),
+    );
+    const call = requestRevision(config, 'in_1', 'logo', 'blurry');
+    await expect(call).rejects.toThrow(/has status "pending"/);
+    await expect(call).rejects.not.toThrow(/idempotency/);
   });
 
   it('410 → deleted intake', async () => {

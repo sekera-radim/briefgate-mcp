@@ -8,7 +8,7 @@
     "url": "https://github.com/sekera-radim/briefgate-mcp",
     "source": "github"
   },
-  "version": "0.10.6",
+  "version": "0.10.7",
   "remotes": [
     {
       "type": "streamable-http",
@@ -20,7 +20,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@briefgate/mcp",
-      "version": "0.10.6",
+      "version": "0.10.7",
       "transport": {
         "type": "stdio"
       },
