@@ -9,6 +9,12 @@
     "source": "github"
   },
   "version": "0.10.6",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.briefgate.dev/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "npm",
