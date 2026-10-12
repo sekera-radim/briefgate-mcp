@@ -1496,6 +1496,33 @@ describe('structuredContent matches outputSchema', () => {
       items: [{ key: 'logo', type: 'image', label: 'Logo' }],
     });
     expectStructuredContentValid('define_intake', result.structuredContent);
+    // The invitation went out, so there is nothing to say about it.
+    expect(result.structuredContent).not.toHaveProperty('invitation_sent');
+  });
+
+  // When an invitation limit is hit the API keeps the intake as a draft and
+  // says so. These two fields were dropped on the way to the agent, which was
+  // left with status "draft" and no way to know the client was never emailed.
+  it('define_intake passes on that the invitation was not sent', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mockOk({
+      intake_id: 'in_1',
+      portal_url: 'https://p.briefgate.dev/1',
+      status: 'draft',
+      items: [{ key: 'logo', status: 'pending' }],
+      invitation_sent: false,
+      note: 'Daily invitation limit of the free plan reached — the intake was created as a draft.',
+    }));
+    const result = await callDefineIntake(config, {
+      project_name: 'Test Project',
+      client: { email: 'client@example.com', name: 'Jana Nováková' },
+      items: [{ key: 'logo', type: 'image', label: 'Logo' }],
+    });
+    expectStructuredContentValid('define_intake', result.structuredContent);
+    expect(result.structuredContent).toMatchObject({
+      status: 'draft',
+      invitation_sent: false,
+      note: expect.stringMatching(/daily invitation limit/i),
+    });
   });
 
   it('get_intake_status', async () => {

@@ -315,6 +315,8 @@ client: { email: "john@example.com", name: "John", language: "cs" }
 //   them can supply the material. Each gets their own email; nobody sees the rest.
 due_date: "2026-08-15"
 branding: { accent_color: "#1B2A4A", sender_name: "Radim" }
+//   Custom branding (Solo plan and up). On Free these are stored but not used: the
+//   email and portal show a built-in sender name with the account owner's address.
 chase_schedule: "default"   // default | gentle | aggressive | custom | off
 // chase_interval: 5, chase_interval_unit: "minutes"   // only with "custom"; omit for every 3 days
 // respect_quiet_hours: false, max_reminders: 12       // for a deliberately rapid cadence
@@ -673,14 +675,13 @@ app.post(
 
 ### Pricing
 
-Launch offer: code `LAUNCH20` gives 20% off Solo and Agency for the lifetime of the subscription, valid until 4 October 2026 (new customers, plans only).
-
 | | Free | Solo — $29/mo | Agency — $79/mo |
 |---|---|---|---|
 | Active intakes | 1 | 15 | 60 |
 | Items per intake | 10 | unlimited | unlimited |
 | Storage | 1 GB | 25 GB | 100 GB |
-| Branding | "powered by" | custom logo + colors | + custom sending domain |
+| Invitations per day | 10 | no daily limit | no daily limit |
+| Branding | "powered by", built-in sender name | sender name, email wording, logo + colors | + custom sending domain |
 | Chase | email, default | email, all schedules | email, all schedules |
 | Secrets vault | — | yes | yes |
 | Webhooks + REST + MCP | yes | yes | yes |

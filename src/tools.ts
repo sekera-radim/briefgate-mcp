@@ -442,6 +442,8 @@ export const TOOLS = [
 
 Call this once at the start of a project, after you know what assets you need. Returns { intake_id, portal_url, status, follow_up }. Save intake_id — you need it for all follow-up calls.
 
+If the response carries invitation_sent: false, the client was NOT emailed: an invitation limit was hit (30 per hour on every plan; 10 per UTC day on the Free plan) and the intake was kept as a draft. Say so instead of reporting the client as contacted — note explains how to send it later.
+
 The server cannot notify this conversation when the client finishes (MCP is request/response), so the returned follow_up block describes how completion will be learned:
 
 - follow_up.recommended = "webhook" — the account has an active webhook endpoint; completion events are delivered there.
@@ -529,11 +531,18 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
         },
         branding: {
           type: 'object',
-          description: 'Override account-level branding for this intake.',
+          description:
+            'Override account-level branding for this intake. logo_url, accent_color and sender_name are custom branding ' +
+            '(Solo plan and up): on the Free plan they are accepted and stored but not used, and the email and portal ' +
+            "show a built-in sender name with the account owner's address instead.",
           properties: {
             logo_url: { type: 'string', description: 'https URL of your logo (shown in portal header).' },
             accent_color: { type: 'string', description: 'Hex accent color, e.g. #1B2A4A.' },
-            sender_name: { type: 'string', description: 'Name shown as email sender, e.g. "Radim".' },
+            sender_name: {
+              type: 'string',
+              description:
+                'Name shown as email sender, e.g. "Radim". No links, web addresses or email addresses — those are rejected. Solo plan and up.',
+            },
             reply_to: { type: 'string', description: 'Reply-to email address.' },
           },
         },
@@ -578,6 +587,8 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
             'Your own subject and intro lines, overriding the built-in translation for this intake. ' +
             'Placeholders: {sender}, {project}, {client}, {count}, {minutes}, {due}. ' +
             'An unknown placeholder is rejected rather than rendered literally to the client. ' +
+            'No links, web addresses or email addresses in any line — those are rejected; the portal button is the only link in the email. ' +
+            'Part of custom branding (Solo plan and up): on the Free plan the lines are stored but the built-in wording is sent. ' +
             'Layout, button and footer stay as they are.',
           properties: {
             invite_subject: { type: 'string', maxLength: 200 },
@@ -736,6 +747,15 @@ Item keys must be snake_case (e.g. "logo", "hero_copy", "ga4_id") — they becom
         portal_url: { type: 'string' },
         status: { type: 'string', enum: ['draft', 'sent', 'in_progress', 'completed', 'archived'] },
         follow_up: FOLLOW_UP_SCHEMA,
+        invitation_sent: {
+          type: 'boolean',
+          description:
+            'Present, and false, only when an invitation limit was hit: the intake exists as a draft and the client was NOT emailed.',
+        },
+        note: {
+          type: 'string',
+          description: 'Comes with invitation_sent: false — which limit was hit and how to send the draft later.',
+        },
         notices: {
           type: 'array',
           description: 'Cadence caveats, present only when chase_schedule="custom" makes them relevant.',
@@ -1760,6 +1780,12 @@ export async function callDefineIntake(
     // it invisible in 0.5.0 — the advice existed on the wire and never
     // reached the agent it was written for.
     ...(result.follow_up ? { follow_up: result.follow_up } : {}),
+    // Same mistake, same fix: when an invitation limit is hit the API keeps
+    // the intake as a draft and says so. With these two dropped, the agent
+    // was left holding status "draft" and nothing to tell it the client had
+    // never been emailed.
+    ...(result.invitation_sent === false ? { invitation_sent: false as const } : {}),
+    ...(result.note ? { note: result.note } : {}),
     ...(notices.length > 0 ? { notices } : {}),
   });
 }

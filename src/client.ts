@@ -82,6 +82,10 @@ export interface IntakeCreated {
   items: Array<{ key: string; status: ItemStatus }>;
   follow_up?: FollowUpAdvice;
   folder_id?: string | null;
+  /** Present, and false, only when an invitation limit kept the intake a draft. */
+  invitation_sent?: false;
+  /** Comes with `invitation_sent: false`: which limit, and how to send the draft later. */
+  note?: string;
 }
 
 export interface IntakeStatusResult {
