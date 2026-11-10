@@ -1,0 +1,39 @@
+# Rebuilds the claude-plugin branch whenever a plugin file changes on main.
+#
+# The Claude directory reads the BriefGate plugin from that branch, not from
+# main (scripts/build-claude-plugin-branch.sh explains why). Building it here
+# means a change to the skill or .mcp.json reaches the directory without a
+# manual step that is easy to forget.
+name: Build claude-plugin branch
+
+on:
+  push:
+    branches: [main]
+    # Exactly the files the script copies (PLUGIN_FILES and BRANCH_README).
+    paths:
+      - '.claude-plugin/plugin.json'
+      - '.claude-plugin/README.md'
+      - '.mcp.json'
+      - 'skills/**'
+      - 'icon.png'
+      - 'LICENSE'
+      - 'scripts/build-claude-plugin-branch.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two pushes in quick succession must not race for the same branch tip.
+concurrency:
+  group: claude-plugin-branch
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          bash scripts/build-claude-plugin-branch.sh --push

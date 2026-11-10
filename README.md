@@ -43,6 +43,8 @@ claude mcp add --transport http briefgate https://mcp.briefgate.dev/mcp
 
 Then run `/mcp` in Claude Code, pick **briefgate**, and choose **Authenticate**.
 
+**Claude apps, Cowork and Claude Code — from the Claude directory:** BriefGate is listed as a [connector](https://claude.ai/directory/briefgate) and as a Claude Code plugin. The plugin installs the same hosted endpoint plus the [`collect-from-client`](skills/collect-from-client/SKILL.md) skill. The directory reads it from the [`claude-plugin`](https://github.com/sekera-radim/briefgate-mcp/tree/claude-plugin) branch, which a GitHub Action rebuilds from `main` with `scripts/build-claude-plugin-branch.sh`.
+
 **Claude Code — local package:**
 
 ```bash

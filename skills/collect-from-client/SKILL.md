@@ -29,16 +29,22 @@ hours or days to respond and will need reminders.
 
 1. **`define_intake`** — create the intake with `project_name`, `client`
    (email, name, language), and an `items` array describing exactly what you
-   need (type: `file`, `image`, `file_list`, `longtext`, `secret`, `select`,
-   `multiselect`, etc., with constraints). This emails the client a
-   no-account portal link and starts automatic chasing. Save the returned
-   `intake_id`.
+   need (type: `text`, `longtext`, `file`, `file_list`, `image`,
+   `color_list`, `select`, `multiselect`, `boolean`, `url`, `secret` or
+   `structured`, with constraints). This emails the client a no-account
+   portal link and starts automatic chasing. Save the returned `intake_id`.
 2. **Tell the user it was sent.** Report the `portal_url` and that BriefGate
-   will chase the client automatically — do not treat this as done.
+   will chase the client automatically — do not treat this as done. If the
+   response has `invitation_sent: false`, the client was not emailed (an
+   invitation limit was hit and the intake was kept as a draft): say so and
+   pass on the `note`, which explains how to send it later.
 3. **Set up how you'll learn it's done.** Nothing pushes to you: follow the
-   `follow_up` block in the `define_intake` response — either a webhook is
-   already configured (`manage_webhook` to set one up if not), or you/the
-   user need to poll `get_intake_status` periodically.
+   `follow_up` block in the `define_intake` response. `recommended: "webhook"`
+   means completion events go to the account's webhook endpoint;
+   `recommended: "schedule"` means checking `get_intake_status` at the
+   cadence in `follow_up.schedule` (offer the user a recurring check). An
+   account that runs a public HTTPS service can register an endpoint with
+   `manage_webhook` instead.
 4. **`get_intake_status`** — check progress later. A "not ready" / pending
    result is normal, not an error; keep waiting or chase again.
 5. **`send_chase`** — send a manual reminder if you want to nudge the client
@@ -56,6 +62,12 @@ If an item is `type: secret` (a password, API key, or similar credential),
 `get_intake_results` includes the value only in the first response. A later
 call reports that it was already revealed but does not return the value
 again, so make sure the user is ready to receive it.
+
+## Plan limits
+
+`secret` items and `request_revision` need a paid plan (Solo and up). On the
+Free plan the API rejects them with an upgrade message. Pass that message on
+to the user rather than retrying.
 
 ## Other tools available
 

@@ -54,6 +54,7 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run test",
     "package:mcpb": "node scripts/build-mcpb.mjs",
+    "package:claude-plugin": "bash scripts/build-claude-plugin-branch.sh",
     "prepublishOnly": "npm run build",
     "version": "node scripts/sync-server-json.mjs && git add server.json"
   },
